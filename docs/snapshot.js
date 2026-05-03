@@ -130,11 +130,12 @@ function investmentJourney(d) {
   const riderRow = d.totalRiderPremiums > 0
     ? `<div style="color: #888780;">Rider premiums: <span style="color: #5f5e5a;">S$${fmt2(d.totalRiderPremiums)}</span></div>`
     : '';
-  const welcomeRow = d.welcomeBonusAmount > 0
-    ? `<div style="color: #888780;">Welcome bonus (${fmtPct1(d.welcomeBonusRate * 100)}%): <span style="color: #5f5e5a;">S$${fmt2(d.welcomeBonusAmount)}</span></div>`
-    : '';
-  const annualBonusRow = d.annualPremiumBonusAmount > 0
-    ? `<div style="color: #888780;">Annual premium bonus (${fmtPct1(d.annualPremiumBonusRate * 100)}%): <span style="color: #5f5e5a;">S$${fmt2(d.annualPremiumBonusAmount)}</span></div>`
+  // Welcome bonus + annual premium bonus are added (not compounded) on
+  // first-year premium. Show them as one consolidated "First Year Bonus" row
+  // in the report — the breakdown lives in the settings panel only.
+  const totalBonusRate = (d.welcomeBonusRate || 0) + (d.annualPremiumBonusRate || 0);
+  const firstYearBonusRow = d.totalBonusPrincipal > 0
+    ? `<div style="color: #888780;">First Year Bonus (${fmtPct1(totalBonusRate * 100)}%): <span style="color: #5f5e5a;">S$${fmt2(d.totalBonusPrincipal)}</span></div>`
     : '';
   const bonusGrowthRow = d.bonusGrowthEstimate > 0
     ? `<div style="color: #888780;">Growth on bonus units (est.): <span style="color: #5f5e5a;">S$${fmt2(d.bonusGrowthEstimate)}</span></div>`
@@ -150,8 +151,7 @@ function investmentJourney(d) {
         <div style="margin-top: 10px; padding-top: 10px; border-top: 0.5px solid rgba(0,0,0,0.08); font-size: 11px; line-height: 1.7;">
           <div style="color: #888780;">Annual premium: <span style="color: #1a1a1a; font-weight: 500;">S$${fmt2(d.annualPremium)}</span></div>
           ${riderRow}
-          ${welcomeRow}
-          ${annualBonusRow}
+          ${firstYearBonusRow}
           <div style="color: #888780;">Reinvested dividends: <span style="color: #5f5e5a;">S$${fmt2(d.totalDividendsReinvested)}</span></div>
           ${bonusGrowthRow}
         </div>
@@ -246,15 +246,14 @@ function holdingsTable(d) {
 function strategyFooter(d) {
   let adjustmentNote = '';
   if (d.adjustmentsActive) {
-    const parts = [];
-    if (d.excludeWelcomeBonus && d.welcomeBonusAmount > 0) {
-      parts.push(`welcome bonus (S$${fmt2(d.welcomeBonusAmount)} @ ${fmtPct1(d.welcomeBonusRate * 100)}%)`);
-    }
-    if (d.excludeAnnualPremiumBonus && d.annualPremiumBonusAmount > 0) {
-      parts.push(`annual premium bonus (S$${fmt2(d.annualPremiumBonusAmount)} @ ${fmtPct1(d.annualPremiumBonusRate * 100)}%)`);
-    }
-    if (parts.length) {
-      adjustmentNote = `<br>Net gain, total return, and annualised IRR exclude ${parts.join(' and ')} (treated as cost basis).`;
+    const excludedAmount =
+      (d.excludeWelcomeBonus ? d.welcomeBonusAmount : 0) +
+      (d.excludeAnnualPremiumBonus ? d.annualPremiumBonusAmount : 0);
+    const excludedRate =
+      (d.excludeWelcomeBonus ? d.welcomeBonusRate : 0) +
+      (d.excludeAnnualPremiumBonus ? d.annualPremiumBonusRate : 0);
+    if (excludedAmount > 0) {
+      adjustmentNote = `<br>Net gain, total return, and annualised IRR exclude First Year Bonus (S$${fmt2(excludedAmount)} @ ${fmtPct1(excludedRate * 100)}%) treated as cost basis.`;
     }
   }
 
