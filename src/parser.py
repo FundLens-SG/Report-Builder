@@ -65,7 +65,11 @@ def parse_pdf(pdf_path: str) -> RawReport:
     """
     with pdfplumber.open(pdf_path) as pdf:
         pages_text = [p.extract_text() or "" for p in pdf.pages]
-        full_text = "\n".join(pages_text)
+        # Only the first 3 pages carry policy data. The glossary on page 4
+        # contains the same labels in different contexts (e.g. "...]-1} X 100\n
+        # Annualised P&L (%) This reflects...") and would cause false-positive
+        # matches if included.
+        full_text = "\n".join(pages_text[:3])
         holdings = _parse_holdings_from_tables(pdf)
 
     # The Manulife PDF lays out Policy Info / P&L Summary in a two-column grid where the

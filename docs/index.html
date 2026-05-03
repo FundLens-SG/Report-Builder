@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manulife Investment Snapshot Generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main class="page">
+  <header class="hero">
+    <h1>Manulife Investment Snapshot</h1>
+    <p class="lede">Drop a Manulife Customer Investment Report PDF, get a clean one-page snapshot PNG.<br>
+      <span class="privacy">All processing happens in your browser — your PDFs never leave your computer.</span></p>
+  </header>
+
+  <section class="dropzone-card">
+    <label for="file-input" id="dropzone" class="dropzone">
+      <div class="dropzone-inner">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/>
+        </svg>
+        <p class="dz-title">Drop PDFs here, or click to choose files</p>
+        <p class="dz-hint">One file = single snapshot. Multiple files = batch (downloaded as a ZIP).</p>
+      </div>
+      <input id="file-input" type="file" accept="application/pdf" multiple hidden>
+    </label>
+    <div id="actions" class="actions" hidden>
+      <button id="process-btn" class="btn btn-primary">Generate snapshot</button>
+      <button id="reset-btn" class="btn btn-ghost">Clear</button>
+    </div>
+    <ul id="file-list" class="file-list"></ul>
+  </section>
+
+  <section id="results" class="results" hidden>
+    <h2>Result</h2>
+    <div id="results-body"></div>
+  </section>
+
+  <footer class="footer">
+    <p>
+      <a href="https://github.com/FundLens-SG/manulife-snapshot" target="_blank" rel="noopener">View source on GitHub</a>
+      &nbsp;·&nbsp;
+      <span>Past performance is not indicative of future performance.</span>
+    </p>
+  </footer>
+</main>
+
+<!-- Off-screen render container — the snapshot HTML is built here, then captured as PNG -->
+<div id="render-stage" aria-hidden="true"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs" type="module"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas-pro@1.5.8/dist/html2canvas-pro.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
