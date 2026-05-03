@@ -28,63 +28,70 @@ export async function parsePdf(arrayBuffer) {
   // extractors reorder Manulife's two-column layout differently — pdfplumber
   // tends to put values above labels, PDF.js often puts values after labels on
   // the same line — so we accept either form.
+  // `[ \t]+` matches inline whitespace ONLY — must NOT cross newlines.
+  // Bare `\s+` would jump to the next line and grab the wrong field's value
+  // (e.g. for Policy Investment Cost, it would latch onto the SGD value
+  // sitting on the Policy Investment Value row above).
   const customerName = grabFirst(fullText, [
-    /^([A-Z][A-Z ]+[A-Z])\s+Manulife\s*\(Singapore\)/m,
+    // Re-laid-out PDFs (scrambled fixture): name sits ON the same line as Manulife
+    /^([A-Z][A-Z ]+[A-Z])[ \t]+Manulife[ \t]*\(Singapore\)/m,
+    // Original Manulife PDFs: name on its OWN line between "Pte. Ltd." and the address
+    /Manulife[ \t]*\(Singapore\)[ \t]+Pte\.[ \t]*Ltd\.[^\n]*\n[ \t]*([A-Z][A-Z ]{1,}[A-Z])[ \t]*\n/,
   ]);
   const reportDate = grabFirst(fullText, [
     /Customer Total Policy Holdings\s*\(as of (\d{1,2} \w+ \d{4})\)/,
   ]);
   const policyName = grabFirst(fullText, [
-    /(Manulife InvestReady[^\n]+?Flexi\s+\d+)\s+SGD\s+[\d,]+\.\d{2}\s*\n[^\n]*Policy Name/,
-    /Policy Name\s+(Manulife InvestReady[^\n]+?Flexi\s+\d+)/,
+    /Policy Name[ \t]+(Manulife InvestReady[^\n]+?Flexi[ \t]+\d+)/,
+    /(Manulife InvestReady[^\n]+?Flexi[ \t]+\d+)[ \t]+SGD[ \t]+[\d,]+\.\d{2}\s*\n[^\n]*Policy Name/,
   ]);
   const policyNumber = grabFirst(fullText, [
-    /(\d{6,12})\s+SGD\s+[\d,]+\.\d{2}\s*\n[^\n]*Policy Number/,
-    /Policy Number\s+(\d{6,12})/,
+    /Policy Number[ \t]+(\d{6,12})/,
+    /(\d{6,12})[ \t]+SGD[ \t]+[\d,]+\.\d{2}\s*\n[^\n]*Policy Number/,
   ]);
   const policyIssueDate = grabFirst(fullText, [
-    /(\d{2}\/\d{2}\/\d{4})\s+Total Rider Premiums\s*\n\s*Policy Issue Date/,
-    /^\s*(\d{2}\/\d{2}\/\d{4})\s*\n\s*Policy Issue Date/m,
-    /Policy Issue Date\s+(\d{2}\/\d{2}\/\d{4})/,
+    /Policy Issue Date[ \t]+(\d{2}\/\d{2}\/\d{4})/,
+    /(\d{2}\/\d{2}\/\d{4})[ \t]+Total Rider Premiums\s*\n\s*Policy Issue Date/,
+    /^[ \t]*(\d{2}\/\d{2}\/\d{4})\s*\n\s*Policy Issue Date/m,
   ]);
 
   const accountValue = grabMoneyFirst(fullText, [
-    /SGD\s+([\d,]+\.\d{2})\s*\n[^\n]*Account Value/,
-    /Account Value\s+SGD\s+([\d,]+\.\d{2})/,
+    /Account Value[ \t]+SGD[ \t]+([\d,]+\.\d{2})/,
+    /SGD[ \t]+([\d,]+\.\d{2})\s*\n[^\n]*Account Value/,
   ]);
   const policyInvestmentCost = grabMoneyFirst(fullText, [
-    /SGD\s+([\d,]+\.\d{2})\s*\n[^\n]*Policy Investment Cost/,
-    /Policy Investment Cost\*?\s+SGD\s+([\d,]+\.\d{2})/,
+    /Policy Investment Cost\*?[ \t]+SGD[ \t]+([\d,]+\.\d{2})/,
+    /SGD[ \t]+([\d,]+\.\d{2})\s*\n[^\n]*Policy Investment Cost/,
   ]);
   const totalPnlDollar = grabMoneyFirst(fullText, [
-    /SGD\s+([\d,]+\.\d{2})\s*\n\s*Total P&L \(\$\)/,
-    /Total P&L \(\$\)\s+SGD\s+([\d,]+\.\d{2})/,
+    /Total P&L \(\$\)[ \t]+SGD[ \t]+([\d,]+\.\d{2})/,
+    /SGD[ \t]+([\d,]+\.\d{2})\s*\n\s*Total P&L \(\$\)/,
   ]);
   const totalRiderPremiums = grabMoneyFirst(fullText, [
-    /SGD\s+([\d,]+\.\d{2})\s*\n[^\n]*Total Rider Premiums/,
-    /Total Rider Premiums\s+SGD\s+([\d,]+\.\d{2})/,
+    /Total Rider Premiums[ \t]+SGD[ \t]+([\d,]+\.\d{2})/,
+    /SGD[ \t]+([\d,]+\.\d{2})\s*\n[^\n]*Total Rider Premiums/,
   ]);
   const totalDividendsReinvested = grabMoneyFirst(fullText, [
-    /SGD\s+([\d,]+\.\d{2})\s*\n\s*Total Dividends Reinvested/,
-    /Total Dividends Reinvested\s+SGD\s+([\d,]+\.\d{2})/,
+    /Total Dividends Reinvested[ \t]+SGD[ \t]+([\d,]+\.\d{2})/,
+    /SGD[ \t]+([\d,]+\.\d{2})\s*\n\s*Total Dividends Reinvested/,
   ]);
 
   const totalPnlPct = parseFloat(grabFirst(fullText, [
+    /Total P&L \(%\)[ \t]+([\d.]+)/,
     /^([\d.]+)\s*\n\s*Total P&L \(%\)/m,
-    /Total P&L \(%\)\s+([\d.]+)/,
   ]) || '0');
   const annualisedPnlPct = parseFloat(grabFirst(fullText, [
+    /Annualised P&L \(%\)[ \t]+([\d.]+)/,
     /^([\d.]+)\s*\n\s*Annualised P&L \(%\)/m,
-    /Annualised P&L \(%\)\s+([\d.]+)/,
   ]) || '0');
 
   const riskProfile = grabFirst(fullText, [
-    /^(\w+)\s+Total Investment Value\s*\n\s*Risk Profile Questionnaire/m,
-    /Risk Profile Questionnaire\s+(\w+)/,
+    /Risk Profile Questionnaire[ \t]+(\w+)/,
+    /^(\w+)[ \t]+Total Investment Value\s*\n\s*Risk Profile Questionnaire/m,
   ]);
   const ckaStatus = grabFirst(fullText, [
-    /Customer Knowledge Assessment\s+(\w+)\s+Total Market Value/,
-    /Customer Knowledge Assessment\s+(\w+)/,
+    /Customer Knowledge Assessment[ \t]+(\w+)[ \t]+Total Market Value/,
+    /Customer Knowledge Assessment[ \t]+(\w+)/,
   ]);
   // Two "(Expiry date: ...)" lines exist (CKA + Risk Profile). The first one
   // after "Customer Knowledge Assessment" is the CKA expiry. Use a non-greedy
@@ -201,8 +208,33 @@ function clusterIntoRows(items) {
     if (last && Math.abs(last[0].y - it.y) <= tolerance) last.push(it);
     else rows.push([it]);
   }
-  rows.forEach(r => r.sort((a, b) => a.x - b.x));
-  return rows;
+  rows.forEach(r => {
+    r.sort((a, b) => a.x - b.x);
+  });
+  return rows.map(mergeSplitNumbers);
+}
+
+// PDF.js sometimes emits "13,737.79" as two adjacent text items: "13,737"
+// then ".79". When the gap is small and the second piece is just a decimal
+// fragment, glue them back together so downstream numeric parsing works.
+function mergeSplitNumbers(row) {
+  const out = [];
+  for (let i = 0; i < row.length; i++) {
+    const cur = row[i];
+    const next = row[i + 1];
+    if (
+      next
+      && /\d$/.test(cur.text)
+      && /^\.\d+$/.test(next.text)
+      && (next.x - cur.x) < 30
+    ) {
+      out.push({ ...cur, text: cur.text + next.text });
+      i++;
+    } else {
+      out.push(cur);
+    }
+  }
+  return out;
 }
 
 function extractHoldingsFromRows(rows) {

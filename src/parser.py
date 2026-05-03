@@ -53,8 +53,20 @@ def _grab(text: str, pattern: str, default: Optional[str] = None, flags: int = 0
     return m.group(1).strip() if m else default
 
 
+def _grab_first(text: str, patterns: list[str], flags: int = 0) -> Optional[str]:
+    for p in patterns:
+        v = _grab(text, p, flags=flags)
+        if v:
+            return v
+    return None
+
+
 def _grab_money(text: str, pattern: str) -> float:
     return _to_float(_grab(text, pattern))
+
+
+def _grab_money_first(text: str, patterns: list[str], flags: int = 0) -> float:
+    return _to_float(_grab_first(text, patterns, flags=flags))
 
 
 def parse_pdf(pdf_path: str) -> RawReport:
@@ -72,29 +84,85 @@ def parse_pdf(pdf_path: str) -> RawReport:
         full_text = "\n".join(pages_text[:3])
         holdings = _parse_holdings_from_tables(pdf)
 
-    # The Manulife PDF lays out Policy Info / P&L Summary in a two-column grid where the
-    # value appears on the line ABOVE the label, with the second column's value tacked
-    # onto the same line. Patterns are written to anchor on the label and look back.
-    customer_name = _grab(full_text, r"^([A-Z][A-Z ]+[A-Z])\s+Manulife\s*\(Singapore\)", flags=re.MULTILINE)
+    # Two layouts to handle:
+    #  - Original Manulife PDF: label and value on the same line, value AFTER
+    #    the label (e.g. "Policy Investment Cost* SGD 30,000.00").
+    #  - Re-laid-out PDFs (scrambled fixtures, certain pdfplumber outputs):
+    #    value on the line ABOVE the label, second-column value tacked onto
+    #    the same line as the first column's value.
+    # We try the more specific "label-then-value" form first; if that doesn't
+    # match, fall back to "value-above-label". The label-first ordering is
+    # critical for Policy Investment Cost / Total Dividends Reinvested whose
+    # preceding lines also end with SGD amounts (different field) — without it
+    # the fallback would greedily latch onto the wrong figure.
+    # `[ \t]+` matches inline whitespace ONLY — it must NOT cross newlines.
+    # Bare `\s+` would jump to the next line and accidentally grab the wrong
+    # field's value (e.g. Policy Investment Cost would latch onto the SGD
+    # amount sitting one line above on the Policy Investment Value row).
+    customer_name = _grab_first(
+        full_text,
+        [
+            r"^([A-Z][A-Z ]+[A-Z])[ \t]+Manulife[ \t]*\(Singapore\)",
+            r"Manulife[ \t]*\(Singapore\)[ \t]+Pte\.[ \t]*Ltd\.[^\n]*\n[ \t]*([A-Z][A-Z ]{1,}[A-Z])[ \t]*\n",
+        ],
+        flags=re.MULTILINE,
+    )
     report_date = _grab(full_text, r"Customer Total Policy Holdings\s*\(as of (\d{1,2} \w+ \d{4})\)")
-    policy_name = _grab(full_text, r"(Manulife InvestReady[^\n]+?Flexi\s+\d+)\s+SGD\s+[\d,]+\.\d{2}\s*\n[^\n]*Policy Name")
-    policy_number = _grab(full_text, r"(\d{6,12})\s+SGD\s+[\d,]+\.\d{2}\s*\n[^\n]*Policy Number")
-    policy_issue_date = _grab(full_text, r"(\d{2}/\d{2}/\d{4})\s+Total Rider Premiums\s*\n\s*Policy Issue Date")
+    policy_name = _grab_first(full_text, [
+        r"Policy Name[ \t]+(Manulife InvestReady[^\n]+?Flexi[ \t]+\d+)",
+        r"(Manulife InvestReady[^\n]+?Flexi[ \t]+\d+)[ \t]+SGD[ \t]+[\d,]+\.\d{2}\s*\n[^\n]*Policy Name",
+    ])
+    policy_number = _grab_first(full_text, [
+        r"Policy Number[ \t]+(\d{6,12})",
+        r"(\d{6,12})[ \t]+SGD[ \t]+[\d,]+\.\d{2}\s*\n[^\n]*Policy Number",
+    ])
+    policy_issue_date = _grab_first(full_text, [
+        r"Policy Issue Date[ \t]+(\d{2}/\d{2}/\d{4})",
+        r"(\d{2}/\d{2}/\d{4})[ \t]+Total Rider Premiums\s*\n\s*Policy Issue Date",
+        r"^[ \t]*(\d{2}/\d{2}/\d{4})\s*\n\s*Policy Issue Date",
+    ], flags=re.MULTILINE)
 
-    account_value = _grab_money(full_text, r"SGD\s+([\d,]+\.\d{2})\s*\n[^\n]*Account Value")
-    policy_investment_cost = _grab_money(full_text, r"SGD\s+([\d,]+\.\d{2})\s*\n[^\n]*Policy Investment Cost")
-    total_pnl_dollar = _grab_money(full_text, r"SGD\s+([\d,]+\.\d{2})\s*\n\s*Total P&L \(\$\)")
-    total_rider_premiums = _grab_money(full_text, r"SGD\s+([\d,]+\.\d{2})\s*\n[^\n]*Total Rider Premiums")
-    total_dividends_reinvested = _grab_money(full_text, r"SGD\s+([\d,]+\.\d{2})\s*\n\s*Total Dividends Reinvested")
+    account_value = _grab_money_first(full_text, [
+        r"Account Value[ \t]+SGD[ \t]+([\d,]+\.\d{2})",
+        r"SGD[ \t]+([\d,]+\.\d{2})\s*\n[^\n]*Account Value",
+    ])
+    policy_investment_cost = _grab_money_first(full_text, [
+        r"Policy Investment Cost\*?[ \t]+SGD[ \t]+([\d,]+\.\d{2})",
+        r"SGD[ \t]+([\d,]+\.\d{2})\s*\n[^\n]*Policy Investment Cost",
+    ])
+    total_pnl_dollar = _grab_money_first(full_text, [
+        r"Total P&L \(\$\)[ \t]+SGD[ \t]+([\d,]+\.\d{2})",
+        r"SGD[ \t]+([\d,]+\.\d{2})\s*\n\s*Total P&L \(\$\)",
+    ])
+    total_rider_premiums = _grab_money_first(full_text, [
+        r"Total Rider Premiums[ \t]+SGD[ \t]+([\d,]+\.\d{2})",
+        r"SGD[ \t]+([\d,]+\.\d{2})\s*\n[^\n]*Total Rider Premiums",
+    ])
+    total_dividends_reinvested = _grab_money_first(full_text, [
+        r"Total Dividends Reinvested[ \t]+SGD[ \t]+([\d,]+\.\d{2})",
+        r"SGD[ \t]+([\d,]+\.\d{2})\s*\n\s*Total Dividends Reinvested",
+    ])
 
-    total_pnl_pct = float(_grab(full_text, r"^([\d.]+)\s*\n\s*Total P&L \(%\)", flags=re.MULTILINE) or 0)
-    annualised_pnl_pct = float(_grab(full_text, r"^([\d.]+)\s*\n\s*Annualised P&L \(%\)", flags=re.MULTILINE) or 0)
+    total_pnl_pct = float(_grab_first(full_text, [
+        r"Total P&L \(%\)[ \t]+([\d.]+)",
+        r"^([\d.]+)\s*\n\s*Total P&L \(%\)",
+    ], flags=re.MULTILINE) or 0)
+    annualised_pnl_pct = float(_grab_first(full_text, [
+        r"Annualised P&L \(%\)[ \t]+([\d.]+)",
+        r"^([\d.]+)\s*\n\s*Annualised P&L \(%\)",
+    ], flags=re.MULTILINE) or 0)
 
-    risk_profile = _grab(full_text, r"^(\w+)\s+Total Investment Value\s*\n\s*Risk Profile Questionnaire", flags=re.MULTILINE)
-    cka_status = _grab(full_text, r"Customer Knowledge Assessment\s+(\w+)\s+Total Market Value")
+    risk_profile = _grab_first(full_text, [
+        r"Risk Profile Questionnaire[ \t]+(\w+)",
+        r"^(\w+)[ \t]+Total Investment Value\s*\n\s*Risk Profile Questionnaire",
+    ], flags=re.MULTILINE)
+    cka_status = _grab_first(full_text, [
+        r"Customer Knowledge Assessment[ \t]+(\w+)[ \t]+Total Market Value",
+        r"Customer Knowledge Assessment[ \t]+(\w+)",
+    ])
     cka_expiry = _grab(
         full_text,
-        r"Customer Knowledge Assessment[^\n]*\n\(Expiry date:\s+(\d{2}/\d{2}/\d{4})\)",
+        r"Customer Knowledge Assessment[\s\S]*?\(Expiry date:\s+(\d{2}/\d{2}/\d{4})\)",
     )
 
     missing = [
