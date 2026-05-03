@@ -8,8 +8,73 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<style>
+  /* CKG Suite Strip — global cross-tool nav. Keep visually consistent
+     across every tool in the CKG suite. */
+  :root { --ckg-strip-h: 36px; }
+  @media (max-width: 640px) { :root { --ckg-strip-h: 44px; } }
+  body { padding-top: var(--ckg-strip-h) !important; }
+  .ckg-suite-strip {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: var(--ckg-strip-h);
+    background: #0a0a0a;
+    border-bottom: 1px solid rgba(214, 179, 106, 0.18);
+    display: flex; align-items: center;
+    padding: 0 14px;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    z-index: 999999;
+    box-sizing: border-box;
+  }
+  .ckg-suite-strip-back {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid rgba(214, 179, 106, 0.32);
+    border-radius: 999px;
+    color: #d6b36a;
+    text-decoration: none;
+    font-size: 11px; font-weight: 500;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    transition: all 150ms ease-out;
+    min-height: 28px;
+  }
+  .ckg-suite-strip-back:hover {
+    background: rgba(214, 179, 106, 0.10);
+    border-color: rgba(214, 179, 106, 0.6);
+    color: #f4f1e8;
+    transform: translateY(-1px);
+  }
+  .ckg-suite-strip-back:focus-visible {
+    outline: 2px solid #d6b36a; outline-offset: 2px;
+  }
+  .ckg-suite-strip-back svg { width: 11px; height: 11px; flex-shrink: 0; }
+  .ckg-suite-strip-crumb {
+    margin-left: 16px;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px; letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(244, 241, 232, 0.58);
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ckg-suite-strip-crumb .muted { color: rgba(244, 241, 232, 0.36); }
+  .ckg-suite-strip-crumb .sep { margin: 0 8px; opacity: 0.5; }
+  @media (max-width: 640px) {
+    .ckg-suite-strip { padding: 0 10px; }
+    .ckg-suite-strip-crumb { display: none; }
+    .ckg-suite-strip-back { min-height: 32px; padding: 8px 14px; font-size: 12px; }
+  }
+</style>
 </head>
 <body>
+<div class="ckg-suite-strip" role="navigation" aria-label="CKG suite">
+  <a href="https://ckgtools.com/" class="ckg-suite-strip-back" aria-label="Back to CKG suite">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="6" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+    <span>CKG</span>
+  </a>
+  <span class="ckg-suite-strip-crumb"><span class="muted">Suite</span><span class="sep">/</span>Report Builder</span>
+</div>
 <main class="page">
   <header class="hero">
     <h1>Manulife Investment Snapshot</h1>
