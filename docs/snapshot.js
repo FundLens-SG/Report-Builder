@@ -98,17 +98,24 @@ function header(d) {
 }
 
 function metricCards(d) {
-  const card = (label, big, sub) => `
+  const card = (label, big, sub, badge = '') => `
     <div style="background: #f5f4ee; border-radius: 8px; padding: 14px;">
-      <p style="font-size: 11px; color: #5f5e5a; margin: 0 0 6px 0;">${label}</p>
+      <p style="font-size: 11px; color: #5f5e5a; margin: 0 0 6px 0;">${label}${badge}</p>
       <p style="font-size: 22px; font-weight: 500; color: #0F6E56; margin: 0; line-height: 1.1;">${big}</p>
       <p style="font-size: 11px; color: #888780; margin: 6px 0 0 0;">${sub}</p>
     </div>`;
+
+  // When bonus exclusions are active, mark the affected cards so the reader
+  // knows the figures aren't Manulife's stated numbers.
+  const badge = d.adjustmentsActive
+    ? ` <span style="background: #fff5e0; color: #8c6312; font-size: 9px; padding: 1px 5px; border-radius: 999px; margin-left: 4px; font-weight: 500;">ADJUSTED</span>`
+    : '';
+
   return `
   <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 1.25rem;">
-    ${card('Net gain', `+S$${fmt2(d.totalPnlDollar)}`, `from S$${fmt0(d.policyInvestmentCost)} invested`)}
-    ${card('Total return', `+${fmtPct2(d.totalPnlPct)}%`, 'absolute, since inception')}
-    ${card('Annualised IRR', `+${fmtPct2(d.annualisedPnlPct)}%`, 'per year')}
+    ${card('Net gain', `+S$${fmt2(d.totalPnlDollar)}`, `from S$${fmt0(d.policyInvestmentCost)} invested`, badge)}
+    ${card('Total return', `+${fmtPct2(d.totalPnlPct)}%`, 'absolute, since inception', badge)}
+    ${card('Annualised IRR', `+${fmtPct2(d.annualisedPnlPct)}%`, 'per year', badge)}
   </div>`;
 }
 
@@ -225,6 +232,20 @@ function holdingsTable(d) {
 }
 
 function strategyFooter(d) {
+  let adjustmentNote = '';
+  if (d.adjustmentsActive) {
+    const parts = [];
+    if (d.excludeWelcomeBonus && d.welcomeBonusAmount > 0) {
+      parts.push(`welcome bonus (S$${fmt2(d.welcomeBonusAmount)} @ ${fmtPct1(d.welcomeBonusRate * 100)}%)`);
+    }
+    if (d.excludeAnnualPremiumBonus && d.annualPremiumBonusAmount > 0) {
+      parts.push(`annual premium bonus (S$${fmt2(d.annualPremiumBonusAmount)} @ ${fmtPct1(d.annualPremiumBonusRate * 100)}%)`);
+    }
+    if (parts.length) {
+      adjustmentNote = `<br>Net gain, total return, and annualised IRR exclude ${parts.join(' and ')} (treated as cost basis).`;
+    }
+  }
+
   return `
   <div style="background: #f5f4ee; border-radius: 8px; padding: 14px;">
     <p style="font-size: 11px; color: #888780; margin: 0 0 6px 0; letter-spacing: 0.5px;">STRATEGY &amp; POSITIONING</p>
@@ -238,6 +259,6 @@ function strategyFooter(d) {
         <p style="color: #5f5e5a; margin: 0; line-height: 1.5;">${fmtPct1(d.incomePct)}% in bonds and multi-asset for yield and stability.</p>
       </div>
     </div>
-    <p style="font-size: 10px; color: #888780; margin: 10px 0 0 0; padding-top: 8px; border-top: 0.5px solid rgba(0,0,0,0.08);">Risk profile: ${esc(d.riskProfile)} · CKA: ${esc(d.ckaStatus)} (expiry ${esc(d.ckaExpiryPretty)}) · Past performance is not indicative of future performance.</p>
+    <p style="font-size: 10px; color: #888780; margin: 10px 0 0 0; padding-top: 8px; border-top: 0.5px solid rgba(0,0,0,0.08);">Risk profile: ${esc(d.riskProfile)} · CKA: ${esc(d.ckaStatus)} (expiry ${esc(d.ckaExpiryPretty)}) · Past performance is not indicative of future performance.${adjustmentNote}</p>
   </div>`;
 }

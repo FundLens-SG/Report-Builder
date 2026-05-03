@@ -2,6 +2,7 @@
 // Mirrors src/parser.py: same regex patterns, same field extraction.
 
 import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
+import { detectProductAndVariation } from './bonus.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
@@ -103,12 +104,15 @@ export async function parsePdf(arrayBuffer) {
     throw new Error('No fund holdings detected on page 3');
   }
 
+  const { product, variation } = detectProductAndVariation(policyName);
+
   return {
     customerName, reportDate, policyName, policyNumber, policyIssueDate,
     accountValue, policyInvestmentCost, totalPnlDollar, totalPnlPct, annualisedPnlPct,
     totalRiderPremiums, totalDividendsReinvested,
     riskProfile, ckaStatus, ckaExpiry,
     holdings,
+    product, variation,
   };
 }
 

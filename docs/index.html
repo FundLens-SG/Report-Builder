@@ -35,6 +35,36 @@
     <ul id="file-list" class="file-list"></ul>
   </section>
 
+  <section id="bonus-panel" class="bonus-panel" hidden>
+    <h2>IRR adjustments</h2>
+    <p class="bonus-detected" id="bonus-detected"></p>
+    <div class="bonus-row">
+      <label class="bonus-toggle">
+        <input type="checkbox" id="exclude-welcome">
+        <span>Exclude welcome bonus</span>
+      </label>
+      <label class="bonus-rate">
+        Rate
+        <input type="number" id="welcome-rate" min="0" max="100" step="0.1" value="0" inputmode="decimal">
+        <span class="suffix">%</span>
+      </label>
+      <span class="bonus-amount" id="welcome-amount">S$0.00</span>
+    </div>
+    <div class="bonus-row">
+      <label class="bonus-toggle">
+        <input type="checkbox" id="exclude-annual">
+        <span>Exclude annual premium bonus</span>
+      </label>
+      <label class="bonus-rate">
+        Rate
+        <input type="number" id="annual-rate" min="0" max="100" step="0.1" value="0" inputmode="decimal">
+        <span class="suffix">%</span>
+      </label>
+      <span class="bonus-amount" id="annual-amount">S$0.00</span>
+    </div>
+    <p class="bonus-hint">Bonuses are added to the cost basis when excluded, lowering net gain, total return, and annualised IRR. Rates auto-fill from the detected product but can be overridden for custom campaigns.</p>
+  </section>
+
   <section id="results" class="results" hidden>
     <h2>Result</h2>
     <div id="results-body"></div>

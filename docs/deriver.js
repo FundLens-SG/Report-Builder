@@ -1,6 +1,8 @@
 // Mirrors src/deriver.py. Turns the raw parsed report into the data dict the
 // snapshot template consumes (with all derived calculations).
 
+import { lookupBonusRates } from './bonus.js';
+
 const COLORS = ['#0F6E56', '#185FA5', '#D85A30', '#534AB7', '#BA7517', '#0C447C', '#993556'];
 
 const ASSET_CLASS_LABELS = {
@@ -17,7 +19,21 @@ const ASSET_CLASS_LABELS = {
 };
 
 
-export function derive(raw) {
+/**
+ * Derive the full data model for the snapshot template.
+ *
+ * @param {object} raw         Output of parsePdf()
+ * @param {object} [options]   Bonus-exclusion adjustments
+ * @param {boolean} [options.excludeWelcomeBonus=false]
+ * @param {boolean} [options.excludeAnnualPremiumBonus=false]
+ * @param {number}  [options.welcomeBonusRate]      Override auto-detected welcome rate (0-1)
+ * @param {number}  [options.annualPremiumBonusRate] Override auto-detected annual rate (0-1)
+ *
+ * When either exclude flag is true, Net gain, Total return, Annualised IRR,
+ * and the Capital/Gains bar are recomputed by adding the bonus dollar amounts
+ * to the cost basis (treating bonuses as if they were premiums paid).
+ */
+export function derive(raw, options = {}) {
   const flexiTerm = intFrom(raw.policyName, /Flexi\s+(\d+)/) ?? 10;
   const policyTermYears = intFrom(raw.policyName, /(\d+)\s+Years?\s+Flexi/) ?? flexiTerm;
 
@@ -31,8 +47,39 @@ export function derive(raw) {
     : 0;
   const premiumsRemaining = Math.max(0, flexiTerm - premiumsPaidCount);
 
+  // Auto-detect bonus rates from the product/variation; allow caller overrides.
+  const auto = lookupBonusRates(raw.product, raw.variation, annualPremium);
+  const welcomeBonusRate = options.welcomeBonusRate ?? auto.welcomeRate;
+  const annualPremiumBonusRate = options.annualPremiumBonusRate ?? auto.annualPremiumRate;
+  const welcomeBonusAmount = round2(annualPremium * welcomeBonusRate);
+  const annualPremiumBonusAmount = round2(annualPremium * annualPremiumBonusRate);
+
+  const excludeWelcome = !!options.excludeWelcomeBonus;
+  const excludeAnnual = !!options.excludeAnnualPremiumBonus;
+  const excludedBonusAmount =
+    (excludeWelcome ? welcomeBonusAmount : 0) +
+    (excludeAnnual ? annualPremiumBonusAmount : 0);
+  const adjustmentsActive = excludedBonusAmount > 0;
+
+  // Adjusted cost = real cost + bonuses we treat as cost. When no exclusions,
+  // adjustedCost === policyInvestmentCost and the metric values fall back to
+  // the PDF's stated numbers (preserves what Manulife officially reported).
+  const adjustedCost = raw.policyInvestmentCost + excludedBonusAmount;
+
+  let totalPnlDollar = raw.totalPnlDollar;
+  let totalPnlPct = raw.totalPnlPct;
+  let annualisedPnlPct = raw.annualisedPnlPct;
+  if (adjustmentsActive && raw.accountValue && adjustedCost > 0) {
+    totalPnlDollar = round2(raw.accountValue - adjustedCost);
+    totalPnlPct = round2((raw.accountValue / adjustedCost - 1) * 100);
+    const days = Math.max(1, daysBetween(issueDate, reportDate));
+    annualisedPnlPct = round2(
+      (Math.pow(raw.accountValue / adjustedCost, 365 / days) - 1) * 100
+    );
+  }
+
   const capitalPct = raw.accountValue
-    ? (raw.policyInvestmentCost / raw.accountValue) * 100
+    ? (adjustedCost / raw.accountValue) * 100
     : 0;
   const gainsPct = Math.max(0, 100 - capitalPct);
 
@@ -55,9 +102,9 @@ export function derive(raw) {
     inceptionDatePretty: prettyDate(raw.policyIssueDate),
     accountValue: raw.accountValue,
     policyInvestmentCost: raw.policyInvestmentCost,
-    totalPnlDollar: raw.totalPnlDollar,
-    totalPnlPct: raw.totalPnlPct,
-    annualisedPnlPct: raw.annualisedPnlPct,
+    totalPnlDollar,
+    totalPnlPct,
+    annualisedPnlPct,
     totalRiderPremiums: raw.totalRiderPremiums,
     totalDividendsReinvested: raw.totalDividendsReinvested,
     riskProfile: raw.riskProfile,
@@ -76,6 +123,16 @@ export function derive(raw) {
     fundPnlTotal,
     equityPct: round1(equityPct),
     incomePct: round1(incomePct),
+    // Bonus context (consumed by the template footnote)
+    product: raw.product,
+    variation: raw.variation,
+    welcomeBonusRate,
+    annualPremiumBonusRate,
+    welcomeBonusAmount,
+    annualPremiumBonusAmount,
+    excludeWelcomeBonus: excludeWelcome,
+    excludeAnnualPremiumBonus: excludeAnnual,
+    adjustmentsActive,
   };
 }
 
@@ -89,6 +146,11 @@ function countAnniversariesPaid(issueDate, reportDate) {
   nextAnniv.setFullYear(issueDate.getFullYear() + years);
   if (reportDate >= nextAnniv) return years + 1;
   return years;
+}
+
+function daysBetween(start, end) {
+  const ms = end.getTime() - start.getTime();
+  return Math.floor(ms / (24 * 60 * 60 * 1000));
 }
 
 function monthsBetween(start, end) {

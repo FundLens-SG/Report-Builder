@@ -126,6 +126,79 @@ html, body {
 .file-status.success { background: var(--bg-success); color: var(--text-success); }
 .file-status.error { background: #fde9e4; color: var(--danger); }
 
+.bonus-panel {
+  margin-top: 32px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-tertiary);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}
+.bonus-panel h2 { font-size: 14px; font-weight: 500; margin: 0 0 4px; color: var(--text-secondary); }
+.bonus-detected {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.bonus-detected strong { color: var(--text-primary); font-weight: 500; }
+.bonus-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-tertiary);
+  font-size: 13px;
+}
+.bonus-row:nth-of-type(2) { border-top: none; }
+.bonus-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 240px;
+  min-width: 0;
+  cursor: pointer;
+  user-select: none;
+}
+.bonus-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.bonus-rate {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.bonus-rate input {
+  width: 64px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+.bonus-rate input::-webkit-outer-spin-button,
+.bonus-rate input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.bonus-rate .suffix { color: var(--text-tertiary); }
+.bonus-amount {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.bonus-hint {
+  margin: 12px 0 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
 .results { margin-top: 32px; }
 .results h2 { font-size: 16px; font-weight: 500; margin: 0 0 12px; color: var(--text-secondary); }
 .preview-card {
