@@ -1,0 +1,17 @@
+name: Notify ckgtools
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch tool-updated event to ckgtools
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.CKGTOOLS_DISPATCH_TOKEN }}
+          repository: FundLens-SG/ckgtools
+          event-type: tool-updated
+          client-payload: '{"tool":"report-builder"}'
