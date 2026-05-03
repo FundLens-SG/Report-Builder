@@ -130,6 +130,15 @@ function investmentJourney(d) {
   const riderRow = d.totalRiderPremiums > 0
     ? `<div style="color: #888780;">Rider premiums: <span style="color: #5f5e5a;">S$${fmt2(d.totalRiderPremiums)}</span></div>`
     : '';
+  const welcomeRow = d.welcomeBonusAmount > 0
+    ? `<div style="color: #888780;">Welcome bonus (${fmtPct1(d.welcomeBonusRate * 100)}%): <span style="color: #5f5e5a;">S$${fmt2(d.welcomeBonusAmount)}</span></div>`
+    : '';
+  const annualBonusRow = d.annualPremiumBonusAmount > 0
+    ? `<div style="color: #888780;">Annual premium bonus (${fmtPct1(d.annualPremiumBonusRate * 100)}%): <span style="color: #5f5e5a;">S$${fmt2(d.annualPremiumBonusAmount)}</span></div>`
+    : '';
+  const bonusGrowthRow = d.bonusGrowthEstimate > 0
+    ? `<div style="color: #888780;">Growth on bonus units (est.): <span style="color: #5f5e5a;">S$${fmt2(d.bonusGrowthEstimate)}</span></div>`
+    : '';
 
   return `
   <div style="background: #ffffff; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 12px; padding: 16px; margin-bottom: 1.25rem;">
@@ -141,7 +150,10 @@ function investmentJourney(d) {
         <div style="margin-top: 10px; padding-top: 10px; border-top: 0.5px solid rgba(0,0,0,0.08); font-size: 11px; line-height: 1.7;">
           <div style="color: #888780;">Annual premium: <span style="color: #1a1a1a; font-weight: 500;">S$${fmt2(d.annualPremium)}</span></div>
           ${riderRow}
+          ${welcomeRow}
+          ${annualBonusRow}
           <div style="color: #888780;">Reinvested dividends: <span style="color: #5f5e5a;">S$${fmt2(d.totalDividendsReinvested)}</span></div>
+          ${bonusGrowthRow}
         </div>
       </div>
       <div style="text-align: right;">

@@ -86,6 +86,17 @@ export function derive(raw, options = {}) {
   const holdingsEnriched = enrichHoldings(raw.holdings, raw.accountValue);
   const fundPnlTotal = holdingsEnriched.reduce((s, h) => s + h.pnlDollar, 0);
 
+  // Estimate the market gain on the bonus units themselves.
+  // Bonuses were credited as units in the funds at inception. Their growth
+  // since then ≈ (basic-premium return rate) × bonus principal. This makes
+  // the gap between policy-level Net gain and the per-fund P&L total
+  // explicit (the fund table only sums P&L on basic-premium allocations).
+  const totalBonusPrincipal = welcomeBonusAmount + annualPremiumBonusAmount;
+  const basicPremiumReturnRate = raw.policyInvestmentCost > 0
+    ? fundPnlTotal / raw.policyInvestmentCost
+    : 0;
+  const bonusGrowthEstimate = round2(totalBonusPrincipal * basicPremiumReturnRate);
+
   const equityPct = holdingsEnriched
     .filter(h => /equity/i.test(h.assetClass) || /equity/i.test(h.subAssetClass))
     .reduce((s, h) => s + h.allocationPct, 0);
@@ -130,6 +141,8 @@ export function derive(raw, options = {}) {
     annualPremiumBonusRate,
     welcomeBonusAmount,
     annualPremiumBonusAmount,
+    totalBonusPrincipal,
+    bonusGrowthEstimate,
     excludeWelcomeBonus: excludeWelcome,
     excludeAnnualPremiumBonus: excludeAnnual,
     adjustmentsActive,
