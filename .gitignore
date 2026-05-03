@@ -1,0 +1,23 @@
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Generated artifacts
+output/*.png
+input/*.pdf
+!input/.gitkeep
+!output/.gitkeep
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

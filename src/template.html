@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Investment Snapshot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f4ee;
+    --bg-success: #e1f5ee;
+    --text-primary: #1a1a1a;
+    --text-secondary: #5f5e5a;
+    --text-tertiary: #888780;
+    --text-success: #0F6E56;
+    --border-tertiary: rgba(0,0,0,0.08);
+    --border-secondary: rgba(0,0,0,0.18);
+    --radius-md: 8px;
+    --radius-lg: 12px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+  }
+  .report {
+    width: 720px;
+    padding: 28px 24px;
+    background: var(--bg-primary);
+  }
+  h2 { font-size: 18px; font-weight: 500; margin: 0 0 2px 0; }
+  h3 { font-size: 14px; font-weight: 500; margin: 0 0 10px 0; color: var(--text-secondary); }
+  p { margin: 0; }
+  table { border-collapse: collapse; width: 100%; }
+</style>
+</head>
+<body>
+<div class="report">
+
+  <!-- HEADER -->
+  <div style="margin-bottom: 1.25rem; padding-bottom: 1rem; border-bottom: 0.5px solid var(--border-tertiary);">
+    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
+      <div>
+        <p style="font-size: 11px; color: var(--text-tertiary); margin: 0 0 4px 0; letter-spacing: 0.5px;">PORTFOLIO PERFORMANCE & ALLOCATION SNAPSHOT</p>
+        <h2>{{ policy_name_pretty }}</h2>
+        <p style="font-size: 12px; color: var(--text-secondary);">Policy {{ policy_number }} · {{ customer_name }} · As of {{ report_date }}</p>
+      </div>
+      <div style="background: var(--bg-success); color: var(--text-success); font-size: 11px; padding: 4px 10px; border-radius: var(--radius-md); font-weight: 500; white-space: nowrap;">~{{ months_invested }} months invested</div>
+    </div>
+  </div>
+
+  <!-- METRIC CARDS -->
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 1.25rem;">
+    <div style="background: var(--bg-secondary); border-radius: var(--radius-md); padding: 14px;">
+      <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">Net gain</p>
+      <p style="font-size: 22px; font-weight: 500; color: var(--text-success); line-height: 1.1;">+S${{ "{:,.2f}".format(total_pnl_dollar) }}</p>
+      <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 6px;">from S${{ "{:,.0f}".format(policy_investment_cost) }} invested</p>
+    </div>
+    <div style="background: var(--bg-secondary); border-radius: var(--radius-md); padding: 14px;">
+      <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">Total return</p>
+      <p style="font-size: 22px; font-weight: 500; color: var(--text-success); line-height: 1.1;">+{{ "%.2f"|format(total_pnl_pct) }}%</p>
+      <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 6px;">absolute, since inception</p>
+    </div>
+    <div style="background: var(--bg-secondary); border-radius: var(--radius-md); padding: 14px;">
+      <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">Annualised IRR</p>
+      <p style="font-size: 22px; font-weight: 500; color: var(--text-success); line-height: 1.1;">+{{ "%.2f"|format(annualised_pnl_pct) }}%</p>
+      <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 6px;">per year</p>
+    </div>
+  </div>
+
+  <!-- INVESTMENT JOURNEY -->
+  <div style="background: var(--bg-primary); border: 0.5px solid var(--border-tertiary); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 1.25rem;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px;">
+      <div>
+        <p style="font-size: 11px; color: var(--text-secondary);">Total premiums paid</p>
+        <p style="font-size: 18px; font-weight: 500; margin-top: 2px;">S${{ "{:,.2f}".format(policy_investment_cost) }}</p>
+        <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">Inception · {{ inception_date_pretty }}</p>
+        <div style="margin-top: 10px; padding-top: 10px; border-top: 0.5px solid var(--border-tertiary); font-size: 11px; line-height: 1.7;">
+          <div style="color: var(--text-tertiary);">Annual premium: <span style="color: var(--text-primary); font-weight: 500;">S${{ "{:,.2f}".format(annual_premium) }}</span></div>
+          {% if total_rider_premiums > 0 %}
+          <div style="color: var(--text-tertiary);">Rider premiums: <span style="color: var(--text-secondary);">S${{ "{:,.2f}".format(total_rider_premiums) }}</span></div>
+          {% endif %}
+          <div style="color: var(--text-tertiary);">Reinvested dividends: <span style="color: var(--text-secondary);">S${{ "{:,.2f}".format(total_dividends_reinvested) }}</span></div>
+        </div>
+      </div>
+      <div style="text-align: right;">
+        <p style="font-size: 11px; color: var(--text-secondary);">Account value <span style="background: var(--bg-success); color: var(--text-success); font-size: 10px; padding: 2px 6px; border-radius: 999px; margin-left: 4px; font-weight: 500;">NOW</span></p>
+        <p style="font-size: 20px; font-weight: 500; margin-top: 2px; color: var(--text-success);">S${{ "{:,.2f}".format(account_value) }}</p>
+        <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">As of {{ report_date }}</p>
+      </div>
+    </div>
+    <div style="position: relative; height: 12px; background: var(--bg-secondary); border-radius: 999px; overflow: hidden;">
+      <div style="position: absolute; left: 0; top: 0; bottom: 0; width: {{ capital_pct }}%; background: #888780; border-radius: 999px;"></div>
+      <div style="position: absolute; left: {{ capital_pct }}%; top: 0; bottom: 0; right: 0; background: #1D9E75; border-radius: 999px;"></div>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--text-tertiary);">
+      <span><span style="display: inline-block; width: 8px; height: 8px; background: #888780; border-radius: 2px; margin-right: 4px; vertical-align: middle;"></span>Capital ({{ "%.1f"|format(capital_pct) }}%)</span>
+      <span><span style="display: inline-block; width: 8px; height: 8px; background: #1D9E75; border-radius: 2px; margin-right: 4px; vertical-align: middle;"></span>Gains ({{ "%.1f"|format(gains_pct) }}%)</span>
+    </div>
+
+    <!-- PREMIUM CYCLE PROGRESS -->
+    <div style="margin-top: 14px; padding-top: 10px; border-top: 0.5px solid var(--border-tertiary); display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 10.5px; color: var(--text-tertiary);">
+      <span style="white-space: nowrap;">Premium term · Flexi {{ flexi_term }}</span>
+      <span style="display: flex; align-items: center; gap: 3px;">
+        {% for i in range(flexi_term) %}
+          {% if i < premiums_paid_count %}
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: #888780;"></span>
+          {% else %}
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--bg-secondary); border: 0.5px solid var(--border-secondary); box-sizing: border-box;"></span>
+          {% endif %}
+        {% endfor %}
+      </span>
+      <span style="white-space: nowrap;">{{ premiums_paid_count }} of {{ flexi_term }} paid · <span style="color: var(--text-secondary);">{{ premiums_remaining }} years remaining</span></span>
+    </div>
+  </div>
+
+  <!-- ALLOCATION + DONUT -->
+  <div style="margin-bottom: 1.25rem;">
+    <h3>Portfolio allocation</h3>
+    <div style="display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; align-items: center;">
+      <div style="position: relative; width: 220px; height: 220px;">
+        <canvas id="alloc-donut" width="220" height="220"></canvas>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px;">
+        {% for h in holdings_enriched %}
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="width: 10px; height: 10px; border-radius: 2px; background: {{ h.color }}; flex-shrink: 0;"></span>
+          <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ h.display_name }} ({{ h.ticker }})</span>
+          <span style="font-weight: 500;">{{ "%.2f"|format(h.allocation_pct) }}%</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- HOLDINGS TABLE -->
+  <div style="margin-bottom: 1.25rem;">
+    <h3>Per-fund performance</h3>
+    <table style="font-size: 12px; table-layout: fixed;">
+      <thead>
+        <tr style="border-bottom: 0.5px solid var(--border-secondary);">
+          <th style="text-align: left; padding: 8px 6px; font-weight: 500; color: var(--text-secondary); width: 38%;">Fund</th>
+          <th style="text-align: left; padding: 8px 6px; font-weight: 500; color: var(--text-secondary); width: 18%;">Asset class</th>
+          <th style="text-align: right; padding: 8px 6px; font-weight: 500; color: var(--text-secondary); width: 18%;">Value (SGD)</th>
+          <th style="text-align: right; padding: 8px 6px; font-weight: 500; color: var(--text-secondary); width: 14%;">P&L ($)</th>
+          <th style="text-align: right; padding: 8px 6px; font-weight: 500; color: var(--text-secondary); width: 12%;">P&L (%)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in holdings_enriched %}
+        <tr style="border-bottom: 0.5px solid var(--border-tertiary);">
+          <td style="padding: 10px 6px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="width: 8px; height: 8px; border-radius: 2px; background: {{ h.color }}; flex-shrink: 0;"></span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ h.display_name }}</span>
+            </div>
+          </td>
+          <td style="padding: 10px 6px; color: var(--text-secondary);">{{ h.asset_class_label }}</td>
+          <td style="padding: 10px 6px; text-align: right;">{{ "{:,.2f}".format(h.fund_value) }}</td>
+          <td style="padding: 10px 6px; text-align: right; color: var(--text-success); font-weight: 500;">+{{ "{:,.2f}".format(h.pnl_dollar) }}</td>
+          <td style="padding: 10px 6px; text-align: right; color: var(--text-success); font-weight: 500;">+{{ "%.2f"|format(h.pnl_pct) }}%</td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td style="padding: 10px 6px; font-weight: 500;">Total</td>
+          <td></td>
+          <td style="padding: 10px 6px; text-align: right; font-weight: 500;">{{ "{:,.2f}".format(account_value) }}</td>
+          <td style="padding: 10px 6px; text-align: right; color: var(--text-success); font-weight: 500;">+{{ "{:,.2f}".format(fund_pnl_total) }}</td>
+          <td style="padding: 10px 6px; text-align: right; color: var(--text-success); font-weight: 500;">—</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="font-size: 10px; color: var(--text-tertiary); margin-top: 6px;">Fund-level P&L sums to S${{ "{:,.2f}".format(fund_pnl_total) }}. Policy-level P&L of S${{ "{:,.2f}".format(total_pnl_dollar) }} also reflects reinvested dividends and unit-price movement at the policy layer.</p>
+  </div>
+
+  <!-- STRATEGY FOOTER -->
+  <div style="background: var(--bg-secondary); border-radius: var(--radius-md); padding: 14px;">
+    <p style="font-size: 11px; color: var(--text-tertiary); margin-bottom: 6px; letter-spacing: 0.5px;">STRATEGY & POSITIONING</p>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 12px;">
+      <div>
+        <p style="font-weight: 500; margin-bottom: 2px;">Equity-led growth</p>
+        <p style="color: var(--text-secondary); line-height: 1.5;">{{ "%.1f"|format(equity_pct) }}% in equities for capital appreciation.</p>
+      </div>
+      <div>
+        <p style="font-weight: 500; margin-bottom: 2px;">Income & diversification</p>
+        <p style="color: var(--text-secondary); line-height: 1.5;">{{ "%.1f"|format(income_pct) }}% in bonds and multi-asset for yield and stability.</p>
+      </div>
+    </div>
+    <p style="font-size: 10px; color: var(--text-tertiary); margin-top: 10px; padding-top: 8px; border-top: 0.5px solid var(--border-tertiary);">Risk profile: {{ risk_profile }} · CKA: {{ cka_status }} (expiry {{ cka_expiry_pretty }}) · Past performance is not indicative of future performance.</p>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  new Chart(document.getElementById('alloc-donut'), {
+    type: 'doughnut',
+    data: {
+      labels: {{ holdings_labels_json | safe }},
+      datasets: [{
+        data: {{ holdings_data_json | safe }},
+        backgroundColor: {{ holdings_colors_json | safe }},
+        borderColor: 'transparent',
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      cutout: '62%',
+      animation: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } }
+    }
+  });
+</script>
+</body>
+</html>
