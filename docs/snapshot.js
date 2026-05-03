@@ -137,9 +137,6 @@ function investmentJourney(d) {
   const firstYearBonusRow = d.totalBonusPrincipal > 0
     ? `<div style="color: #888780;">First Year Bonus (${fmtPct1(totalBonusRate * 100)}%): <span style="color: #5f5e5a;">S$${fmt2(d.totalBonusPrincipal)}</span></div>`
     : '';
-  const bonusGrowthRow = d.bonusGrowthEstimate > 0
-    ? `<div style="color: #888780;">Growth on bonus units (est.): <span style="color: #5f5e5a;">S$${fmt2(d.bonusGrowthEstimate)}</span></div>`
-    : '';
 
   return `
   <div style="background: #ffffff; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 12px; padding: 16px; margin-bottom: 1.25rem;">
@@ -153,7 +150,6 @@ function investmentJourney(d) {
           ${riderRow}
           ${firstYearBonusRow}
           <div style="color: #888780;">Reinvested dividends: <span style="color: #5f5e5a;">S$${fmt2(d.totalDividendsReinvested)}</span></div>
-          ${bonusGrowthRow}
         </div>
       </div>
       <div style="text-align: right;">
