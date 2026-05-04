@@ -85,6 +85,12 @@ function scheduleRerender() {
   // Sync rate-input editability with each toggle's checked state.
   welcomeRateEl.readOnly = !excludeWelcomeEl.checked;
   annualRateEl.readOnly = !excludeAnnualEl.checked;
+  // Refresh the bonus-dollar labels immediately so they track the rate input
+  // as the user types — only the (debounced) snapshot re-render is deferred.
+  const firstOk = queue.find(q => q.raw);
+  if (firstOk) {
+    updateBonusAmounts(derive(firstOk.raw, {}).annualPremium);
+  }
   clearTimeout(rerenderTimer);
   rerenderTimer = setTimeout(() => updateAllRendered().catch(console.error), 90);
 }
