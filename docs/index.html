@@ -1,7 +1,7 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Report Builder · CKG</title>
 <link rel="icon" type="image/svg+xml" href="report-builder.svg">
@@ -9,71 +9,16 @@
 <link rel="icon" type="image/png" sizes="64x64" href="report-builder-64.png">
 <link rel="icon" type="image/png" sizes="256x256" href="report-builder-256.png">
 <link rel="apple-touch-icon" sizes="256x256" href="report-builder-256.png">
-<meta name="theme-color" content="#1a1814">
+<meta name="theme-color" content="#0a0a0a">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..600&family=Geist:wght@300..600&family=Geist+Mono:wght@300..500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
-<style>
-  /* CKG Suite Strip — global cross-tool nav. Keep visually consistent
-     across every tool in the CKG suite. */
-  :root { --ckg-strip-h: 36px; }
-  @media (max-width: 640px) { :root { --ckg-strip-h: 44px; } }
-  body { padding-top: var(--ckg-strip-h) !important; }
-  .ckg-suite-strip {
-    position: fixed; top: 0; left: 0; right: 0;
-    height: var(--ckg-strip-h);
-    background: #0a0a0a;
-    border-bottom: 1px solid rgba(214, 168, 122, 0.18);
-    display: flex; align-items: center;
-    padding: 0 14px;
-    font-family: 'Geist', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-    z-index: 999999;
-    box-sizing: border-box;
-  }
-  .ckg-suite-strip-back {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 6px 12px;
-    background: transparent;
-    border: 1px solid rgba(214, 168, 122, 0.32);
-    border-radius: 999px;
-    color: #d6a87a;
-    text-decoration: none;
-    font-size: 11px; font-weight: 500;
-    letter-spacing: 0.06em;
-    line-height: 1;
-    transition: all 150ms ease-out;
-    min-height: 28px;
-  }
-  .ckg-suite-strip-back:hover {
-    background: rgba(214, 168, 122, 0.10);
-    border-color: rgba(214, 168, 122, 0.6);
-    color: #f4f1e8;
-    transform: translateY(-1px);
-  }
-  .ckg-suite-strip-back:focus-visible {
-    outline: 2px solid #d6a87a; outline-offset: 2px;
-  }
-  .ckg-suite-strip-back svg { width: 11px; height: 11px; flex-shrink: 0; }
-  .ckg-suite-strip-crumb {
-    margin-left: 16px;
-    font-family: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10.5px; letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: rgba(244, 241, 232, 0.58);
-    flex: 1; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .ckg-suite-strip-crumb .muted { color: rgba(244, 241, 232, 0.36); }
-  .ckg-suite-strip-crumb .sep { margin: 0 8px; opacity: 0.5; }
-  @media (max-width: 640px) {
-    .ckg-suite-strip { padding: 0 10px; }
-    .ckg-suite-strip-crumb { display: none; }
-    .ckg-suite-strip-back { min-height: 32px; padding: 8px 14px; font-size: 12px; }
-  }
-</style>
 </head>
 <body>
+
+<!-- CKG suite strip — links back to the suite shell -->
 <div class="ckg-suite-strip" role="navigation" aria-label="CKG suite">
   <a href="https://ckgtools.com/" class="ckg-suite-strip-back" aria-label="Back to CKG suite">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="6" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
@@ -81,76 +26,154 @@
   </a>
   <span class="ckg-suite-strip-crumb"><span class="muted">Suite</span><span class="sep">/</span>Report Builder</span>
 </div>
-<main class="page">
+
+<main class="shell">
+  <!-- Hero -->
   <header class="hero">
-    <h1>Manulife Investment Snapshot</h1>
-    <p class="lede">Drop a Manulife Customer Investment Report PDF, get a clean one-page snapshot PNG.<br>
-      <span class="privacy">All processing happens in your browser — your PDFs never leave your computer.</span></p>
+    <div class="kicker">
+      <span class="midot">●</span>
+      <span>CKG · Report Builder</span>
+      <span class="midot">●</span>
+      <span>Investment Snapshot</span>
+    </div>
+    <h1>Turn a six-page Manulife report into a one-page <span class="em">snapshot</span> a client can actually read.</h1>
+    <p class="lede">Drop a Customer Investment Report PDF. We render a clean 720&thinsp;px PNG you can drop into WhatsApp, an email, or a meeting deck — usually in under three seconds.</p>
+    <div class="privacy-badge">
+      <span class="dot"></span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>
+      <span><strong>PDFs never leave your computer.</strong>&nbsp; Parsing and rendering happen in your browser.</span>
+    </div>
   </header>
 
-  <section class="dropzone-card">
-    <label for="file-input" id="dropzone" class="dropzone">
-      <div class="dropzone-inner">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/>
-        </svg>
-        <p class="dz-title">Drop PDFs here, or click to choose files</p>
-        <p class="dz-hint">One file = single snapshot. Multiple files = batch (downloaded as a ZIP).</p>
+  <!-- Drop zone (twin: drop target + sample peek) -->
+  <div class="dropzone-wrap" id="dropzone-wrap">
+    <label class="dropzone" for="file-input" id="dropzone">
+      <div>
+        <div class="dz-kicker">
+          <span class="num">1</span>
+          <span>Drop · or click to browse</span>
+        </div>
+        <h2 class="dz-title">Drop a Manulife report —<br><em>get a snapshot in three seconds.</em></h2>
+        <p class="dz-hint">One file becomes a single PNG. Multiple files come back as a ZIP. Drag adds to the list — it never replaces.</p>
+      </div>
+      <div class="dz-cta-row">
+        <button class="btn btn-primary" type="button" id="choose-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg>
+          Choose PDFs
+        </button>
+        <span class="dz-spec" style="margin: 0;"><span><b>Supported</b> InvestReady Growth · InvestReady (III)</span></span>
       </div>
       <input id="file-input" type="file" accept="application/pdf" multiple hidden>
     </label>
-    <div id="actions" class="actions" hidden>
-      <button id="process-btn" class="btn btn-primary">Generate snapshot</button>
-      <button id="reset-btn" class="btn btn-ghost">Clear</button>
+
+    <aside class="sample-peek">
+      <div class="peek-kicker">What you'll get</div>
+      <p class="peek-title">One vertical PNG, six sections, polished out of context. Same brand colors every time — <em>so it always looks like the same product</em> in client meetings.</p>
+      <div class="peek-canvas">
+        <img src="snapshot-silhouette.svg" alt="Snapshot preview silhouette" style="width: 88%; display: block;">
+      </div>
+    </aside>
+  </div>
+
+  <!-- File list (collapses when empty via :empty rule in styles.css) -->
+  <ul class="file-list" id="file-list"></ul>
+
+  <!-- Adjustments / bonus panel -->
+  <div id="adjustments-block" hidden>
+    <div class="section-h">
+      <span class="label">— Adjustments</span>
+      <span class="num">Optional · advisory disclosure</span>
     </div>
-    <ul id="file-list" class="file-list"></ul>
+    <section class="card bonus-panel">
+      <header class="bonus-head">
+        <h3>IRR adjustments <span class="em">— exclude bonuses from cost basis</span></h3>
+        <span class="helper">Updates the snapshot live</span>
+      </header>
+
+      <div class="bonus-detected">
+        <div class="col">
+          <div class="lbl">Detected product <span class="auto">AUTO</span></div>
+          <div class="val" id="detected-product">—</div>
+          <div class="sub" id="detected-variation-line">—</div>
+        </div>
+        <div class="col">
+          <div class="lbl">Detected bonus rates <span class="auto">AUTO</span></div>
+          <div class="val" id="detected-rates">—</div>
+          <div class="sub">Welcome (Year 1)&nbsp;&nbsp;·&nbsp;&nbsp;Annual premium</div>
+        </div>
+      </div>
+
+      <div class="bonus-rows">
+        <div class="bonus-row">
+          <label class="bonus-check">
+            <input type="checkbox" id="exclude-welcome">
+            <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span>
+          </label>
+          <div class="meta">
+            <span class="ttl">Exclude Welcome Bonus from IRR</span>
+            <span class="desc">First-year-only bonus, paid by Manulife at policy inception.</span>
+          </div>
+          <div class="rate-input">
+            <input type="number" id="welcome-rate" value="0" step="0.1" min="0" max="100" inputmode="decimal">
+            <span class="suffix">%</span>
+          </div>
+          <div class="bonus-amount" id="welcome-amount">S$0.00</div>
+        </div>
+
+        <div class="bonus-row">
+          <label class="bonus-check">
+            <input type="checkbox" id="exclude-annual">
+            <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span>
+          </label>
+          <div class="meta">
+            <span class="ttl">Exclude Annual Premium Bonus from IRR</span>
+            <span class="desc">Recurring bonus paid each premium year. Override the rate for custom campaigns.</span>
+          </div>
+          <div class="rate-input">
+            <input type="number" id="annual-rate" value="0" step="0.1" min="0" max="100" inputmode="decimal">
+            <span class="suffix">%</span>
+          </div>
+          <div class="bonus-amount" id="annual-amount">S$0.00</div>
+        </div>
+      </div>
+
+      <p class="bonus-foot">Excluded bonuses are added to the cost basis — net gain, total return, and annualised IRR fall accordingly. The rates above default to Manulife's published values; override only for custom campaigns.</p>
+    </section>
+  </div>
+
+  <!-- Result section -->
+  <section class="result-section" id="result-section" hidden>
+    <div class="section-h">
+      <span class="label">— Snapshot result</span>
+      <span class="num" id="result-count">PNG ready</span>
+    </div>
+    <div class="result-grid">
+      <div class="card preview-card">
+        <div class="preview-frame">
+          <img id="snapshot-preview" alt="Generated snapshot" style="width: 100%; max-width: 320px; display: block;">
+        </div>
+        <div class="preview-foot">
+          <span class="name" id="preview-filename">—</span>
+          <a class="btn btn-primary" id="download-btn" download>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12"/><path d="m6 14 6 6 6-6"/><path d="M4 22h16"/></svg>
+            <span id="download-label">Download PNG</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="card delta-card" id="delta-card">
+        <!-- Built dynamically based on adjustment state -->
+      </div>
+    </div>
   </section>
 
-  <section id="bonus-panel" class="bonus-panel" hidden>
-    <h2>IRR adjustments</h2>
-    <p class="bonus-detected" id="bonus-detected"></p>
-    <div class="bonus-row">
-      <label class="bonus-toggle">
-        <input type="checkbox" id="exclude-welcome">
-        <span>Exclude welcome bonus</span>
-      </label>
-      <label class="bonus-rate">
-        Rate
-        <input type="number" id="welcome-rate" min="0" max="100" step="0.1" value="0" inputmode="decimal">
-        <span class="suffix">%</span>
-      </label>
-      <span class="bonus-amount" id="welcome-amount">S$0.00</span>
-    </div>
-    <div class="bonus-row">
-      <label class="bonus-toggle">
-        <input type="checkbox" id="exclude-annual">
-        <span>Exclude annual premium bonus</span>
-      </label>
-      <label class="bonus-rate">
-        Rate
-        <input type="number" id="annual-rate" min="0" max="100" step="0.1" value="0" inputmode="decimal">
-        <span class="suffix">%</span>
-      </label>
-      <span class="bonus-amount" id="annual-amount">S$0.00</span>
-    </div>
-    <p class="bonus-hint">Bonuses are added to the cost basis when excluded, lowering net gain, total return, and annualised IRR. Rates auto-fill from the detected product but can be overridden for custom campaigns.</p>
-  </section>
-
-  <section id="results" class="results" hidden>
-    <h2>Result</h2>
-    <div id="results-body"></div>
-  </section>
-
-  <footer class="footer">
-    <p>
-      <a href="https://github.com/FundLens-SG/manulife-snapshot" target="_blank" rel="noopener">View source on GitHub</a>
-      &nbsp;·&nbsp;
-      <span>Past performance is not indicative of future performance.</span>
-    </p>
+  <footer class="foot">
+    <a href="https://github.com/FundLens-SG/Report-Builder" target="_blank" rel="noopener">View source on GitHub</a>
+    <span class="disclaimer">Past performance is not indicative of future performance.</span>
   </footer>
 </main>
 
-<!-- Off-screen render container — the snapshot HTML is built here, then captured as PNG -->
+<!-- Hidden render stage: snapshot.js builds the 720px DOM here for capture -->
 <div id="render-stage" aria-hidden="true"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs" type="module"></script>
