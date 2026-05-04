@@ -35,49 +35,53 @@ export function buildSnapshotElement(data) {
 
 
 export async function renderToPng(data) {
+  // Each invocation owns its own node and removes only that node when done.
+  // Concurrent renders (rapid bonus-toggle clicks) used to clobber each
+  // other when we cleared `stage.innerHTML`, causing html2canvas to fail
+  // with "Unable to find element in cloned iframe" mid-flight.
   const stage = document.getElementById('render-stage');
-  stage.innerHTML = '';
   const node = buildSnapshotElement(data);
   stage.appendChild(node);
 
-  // Donut chart inside the snapshot
-  const canvas = node.querySelector('#alloc-donut');
-  // eslint-disable-next-line no-undef
-  new Chart(canvas, {
-    type: 'doughnut',
-    data: {
-      labels: data.holdingsEnriched.map(h => `${h.displayName} (${h.ticker})`),
-      datasets: [{
-        data: data.holdingsEnriched.map(h => Number(h.allocationPct.toFixed(4))),
-        backgroundColor: data.holdingsEnriched.map(h => h.color),
-        borderColor: 'transparent',
-        borderWidth: 0,
-      }],
-    },
-    options: {
-      responsive: false,
-      maintainAspectRatio: false,
-      cutout: '62%',
-      animation: false,
-      plugins: { legend: { display: false }, tooltip: { enabled: false } },
-    },
-  });
+  try {
+    const canvas = node.querySelector('#alloc-donut');
+    // eslint-disable-next-line no-undef
+    new Chart(canvas, {
+      type: 'doughnut',
+      data: {
+        labels: data.holdingsEnriched.map(h => `${h.displayName} (${h.ticker})`),
+        datasets: [{
+          data: data.holdingsEnriched.map(h => Number(h.allocationPct.toFixed(4))),
+          backgroundColor: data.holdingsEnriched.map(h => h.color),
+          borderColor: 'transparent',
+          borderWidth: 0,
+        }],
+      },
+      options: {
+        responsive: false,
+        maintainAspectRatio: false,
+        cutout: '62%',
+        animation: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      },
+    });
 
-  await document.fonts.ready;
-  // Give Chart.js a tick to commit the donut to the canvas
-  await new Promise(r => setTimeout(r, 80));
+    await document.fonts.ready;
+    // Give Chart.js a tick to commit the donut to the canvas
+    await new Promise(r => setTimeout(r, 80));
 
-  // eslint-disable-next-line no-undef
-  const captured = await html2canvas(node, {
-    backgroundColor: '#ffffff',
-    scale: 2,
-    useCORS: true,
-    logging: false,
-  });
+    // eslint-disable-next-line no-undef
+    const captured = await html2canvas(node, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      useCORS: true,
+      logging: false,
+    });
 
-  stage.innerHTML = '';
-
-  return new Promise((resolve) => captured.toBlob(blob => resolve(blob), 'image/png'));
+    return await new Promise((resolve) => captured.toBlob(blob => resolve(blob), 'image/png'));
+  } finally {
+    node.remove();
+  }
 }
 
 

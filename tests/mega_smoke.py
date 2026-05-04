@@ -206,23 +206,28 @@ def check_bonus_toggles(page: Page, label: str):
     for case_name, w, a, expect_pill in cases:
         set_checkbox(page, "#exclude-welcome", w)
         set_checkbox(page, "#exclude-annual", a)
-        time.sleep(1.0)
 
         if expect_pill is None:
-            # Unadjusted view: no pill, kicker says "Snapshot ready"
+            # Unadjusted view: wait until the kicker actually says "Snapshot ready"
+            # (the snapshot re-render is debounced + html2canvas is slow on LIVE).
+            page.wait_for_function(
+                "document.querySelector('.delta-card .delta-kicker')?.textContent.includes('Snapshot ready')",
+                timeout=15_000,
+            )
             assert page.query_selector(".delta-card .pill") is None, "pill should be gone"
-            kicker = text(page, ".delta-card .delta-kicker")
-            assert "Snapshot ready" in kicker, kicker
             print(f"  [{case_name}] reverted to unadjusted view")
             continue
 
-        page.wait_for_selector(".delta-card .pill", timeout=5_000)
+        # Wait for the right pill to appear with the right text.
+        page.wait_for_function(
+            f"document.querySelector('.delta-card .pill')?.textContent.includes('{expect_pill}')",
+            timeout=15_000,
+        )
         pill = text(page, ".delta-card .pill")
         from_irr = parse_signed_pct(text(page, ".delta-row.dim .from"))
         to_irr = parse_signed_pct(text(page, ".delta-row.dim .to"))
         print(f"  [{case_name}] pill={pill}  IRR  {from_irr}% -> {to_irr}%")
         assert to_irr < from_irr, f"adjusted IRR ({to_irr}) should be < baseline ({from_irr})"
-        assert expect_pill in pill, f"expected '{expect_pill}' in pill: {pill!r}"
         irrs[case_name] = to_irr
 
     # Sanity: BOTH-excluded IRR should be the lowest (most aggressive cost-basis bump),

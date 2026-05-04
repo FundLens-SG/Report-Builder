@@ -230,6 +230,10 @@ async function updateAllRendered() {
       successes.push({ item, blob, data });
       setStatus(item, 'done');
     } catch (err) {
+      // If a newer render started, html2canvas can fail mid-flight when its
+      // cloned iframe loses the now-removed node. That's not a real parse
+      // failure — silently abort this stale pass and let the newer one run.
+      if (myToken !== renderToken) return;
       console.error(`Failed to render ${item.file.name}:`, err);
       item.error = err?.message ?? String(err);
       setStatus(item, 'failed');
