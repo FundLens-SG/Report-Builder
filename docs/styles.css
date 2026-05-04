@@ -8,8 +8,9 @@
   --text-success: #0F6E56;
   --border-tertiary: rgba(0,0,0,0.08);
   --border-secondary: rgba(0,0,0,0.18);
-  --accent: #0F6E56;
-  --accent-soft: #e1f5ee;
+  /* Brand accent — CKG brass. Success-green stays separate (semantic). */
+  --accent: #d6a87a;
+  --accent-soft: #f4ecdf;
   --danger: #b8351b;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -96,7 +97,7 @@ html, body {
   background: var(--accent);
   color: white;
 }
-.btn-primary:hover { background: #0a5743; }
+.btn-primary:hover { background: #c0925f; }
 .btn-primary:disabled { background: #c5c4be; cursor: not-allowed; }
 .btn-ghost {
   background: transparent;
