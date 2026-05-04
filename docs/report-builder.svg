@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 64 64">
+  <defs><linearGradient id="ad-shine" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="white" stop-opacity="0.10"></stop>
+  <stop offset="1" stop-color="white" stop-opacity="0"></stop>
+</linearGradient></defs>
+  
+      <rect width="64" height="64" rx="13" fill="oklch(0.20 0.012 80)"></rect>
+      <rect x="9" y="16" width="20" height="26" rx="2.5" fill="oklch(0.30 0.012 30 / 0.55)" stroke="oklch(0.62 0.020 80 / 0.6)" stroke-width="1"></rect>
+      <rect x="11" y="13" width="20" height="26" rx="2.5" fill="oklch(0.20 0.012 80)" stroke="oklch(0.86 0.020 80)" stroke-width="1.4"></rect>
+      <path d="M25 13v5a2 2 0 0 0 2 2h4" fill="none" stroke="oklch(0.86 0.020 80)" stroke-width="1.4"></path>
+      <rect x="13.5" y="29" width="13" height="5" rx="1" fill="oklch(0.78 0.13 28)"></rect>
+      <text x="20" y="32.7" font-family="Geist Mono, monospace" font-size="3.8" font-weight="700" fill="oklch(0.16 0.005 80)" text-anchor="middle" letter-spacing="0.2">PDF</text>
+      <path d="M14 22h11 M14 25h9" stroke="oklch(0.62 0.020 80)" stroke-width="1" stroke-linecap="round"></path>
+      <path d="M33 27h6 m-2 -2 l2 2 -2 2" stroke="oklch(0.82 0.095 70)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"></path>
+      <rect x="40" y="20" width="18" height="24" rx="2.5" fill="oklch(0.18 0.020 250 / 0.85)" stroke="oklch(0.82 0.095 70)" stroke-width="1.4"></rect>
+      <rect x="43.2" y="36" width="2.5" height="5" rx="0.6" fill="oklch(0.62 0.10 240)"></rect>
+      <rect x="46.9" y="33" width="2.5" height="8" rx="0.6" fill="oklch(0.66 0.11 165)"></rect>
+      <rect x="50.6" y="29" width="2.5" height="12" rx="0.6" fill="oklch(0.78 0.12 80)"></rect>
+      <rect x="54.3" y="34" width="2.5" height="7" rx="0.6" fill="oklch(0.62 0.10 240)"></rect>
+      <path d="M43 26h12" stroke="oklch(0.82 0.095 70 / 0.6)" stroke-width="0.8"></path>
+      <circle cx="55" cy="25" r="1" fill="oklch(0.82 0.095 70)"></circle>
+      <rect x="42" y="40" width="11" height="3" rx="0.8" fill="oklch(0.82 0.095 70)"></rect>
+    
+</svg>
