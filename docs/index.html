@@ -15,6 +15,52 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..600&family=Geist:wght@300..600&family=Geist+Mono:wght@300..500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+
+<!-- ckgtools cross-tool activity log: when this app is served from
+     ckgtools.com/tools/report-builder/, the same-origin localStorage
+     carries the hub Supabase session, so the same anon-key client
+     picks it up automatically. Anon key is public-safe by design. -->
+<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+  (function () {
+    try {
+      var SB_URL = 'https://cbqbvctnrfbxjscgirpn.supabase.co';
+      var SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNicWJ2Y3RucmZieGpzY2dpcnBuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3ODcxMDAsImV4cCI6MjA5MzM2MzEwMH0.OFqwlvZslsibwTN2qgfmIREAI9Bel-BKGnM7D2HV2sM';
+      var sb = window.supabase && window.supabase.createClient(SB_URL, SB_ANON, {
+        auth: { persistSession: true, autoRefreshToken: true, flowType: 'pkce' }
+      });
+      if (!sb) return;
+      window._ckgSupabase = sb;
+      window.ckgTrackReportConverted = async function (raw, data) {
+        try {
+          var u = (await sb.auth.getUser()).data.user;
+          if (!u) return;
+          var customer = (data && data.customerNameTitle) || (raw && raw.customerName) || 'client';
+          var policy   = (raw && raw.policyNumber) || '';
+          var rdate    = (raw && raw.reportDate) || '';
+          var entityId = 'rpt_' + (raw && raw.customerName ? raw.customerName.replace(/\s+/g, '_') : 'unknown') + '_' + policy + '_' + rdate;
+          var err = (await sb.from('tool_activity_events').insert({
+            user_id: u.id,
+            tool_id: 'report_builder',
+            action: 'client_report_converted',
+            entity_type: 'client_report',
+            entity_id: entityId,
+            entity_name: customer + (policy ? ' · ' + policy : ''),
+            client_name: customer,
+            status: 'completed',
+            actor_name: u.email || null,
+            metadata: {
+              policy_number: policy || null,
+              report_date: rdate || null,
+              format: 'png'
+            }
+          })).error;
+          if (err && err.code !== '23505') console.warn('[CkgActivity] client_report_converted:', err.message);
+        } catch (_e) { /* never block on tracking */ }
+      };
+    } catch (_e) { /* never block app boot on tracking init */ }
+  })();
+</script>
 </head>
 <body>
 

@@ -229,6 +229,9 @@ async function updateAllRendered() {
       if (myToken !== renderToken) return;  // newer render started
       successes.push({ item, blob, data });
       setStatus(item, 'done');
+      // Cross-tool activity log (ckgtools landing): one event per
+      // successfully converted report. No-op when not signed into hub.
+      try { window.ckgTrackReportConverted && window.ckgTrackReportConverted(item.raw, data); } catch (_e) {}
     } catch (err) {
       // If a newer render started, html2canvas can fail mid-flight when its
       // cloned iframe loses the now-removed node. That's not a real parse
