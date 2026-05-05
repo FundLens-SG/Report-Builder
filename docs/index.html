@@ -200,10 +200,20 @@
         </div>
         <div class="preview-foot">
           <span class="name" id="preview-filename">—</span>
-          <a class="btn btn-primary" id="download-btn" download>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12"/><path d="m6 14 6 6 6-6"/><path d="M4 22h16"/></svg>
-            <span id="download-label">Download PNG</span>
-          </a>
+          <div class="result-actions">
+            <a class="btn btn-primary" id="download-btn" download>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12"/><path d="m6 14 6 6 6-6"/><path d="M4 22h16"/></svg>
+              <span id="download-label">Download PNG</span>
+            </a>
+            <button class="btn" id="drive-save-btn" type="button" title="Save the current PNG to your Google Drive (drive.file scope only)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><circle cx="12" cy="14" r="3"/></svg>
+              <span id="drive-save-label">Save to Drive</span>
+            </button>
+            <button class="btn" id="drive-load-btn" type="button" title="Load a previously saved report image from your Google Drive">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              <span>Load from Drive</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -226,6 +236,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas-pro@1.5.8/dist/html2canvas-pro.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="drive.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -899,3 +899,19 @@ body.accent-bold {
   --accent-dim:oklch(0.78 0.14 65 / 0.18);
   --accent-line: oklch(0.78 0.14 65 / 0.40);
 }
+
+
+/* ── Phase 9F — Result actions row (Download / Save Drive / Load Drive) ── */
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.result-actions .btn {
+  flex: 0 0 auto;
+}
+.result-actions .btn[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

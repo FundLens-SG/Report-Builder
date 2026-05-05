@@ -33,7 +33,15 @@ const previewImg = document.getElementById('snapshot-preview');
 const previewFilenameEl = document.getElementById('preview-filename');
 const downloadBtn = document.getElementById('download-btn');
 const downloadLabel = document.getElementById('download-label');
+const driveSaveBtn = document.getElementById('drive-save-btn');
+const driveSaveLabel = document.getElementById('drive-save-label');
+const driveLoadBtn = document.getElementById('drive-load-btn');
 const deltaCardEl = document.getElementById('delta-card');
+
+// Phase 9F — keep the latest preview blob + meta so the Drive Save
+// button always saves the currently displayed report.
+let lastPreviewBlob = null;
+let lastPreviewMeta = null;
 
 const STATUS_LABELS = {
   queued: 'Queued',
@@ -255,6 +263,16 @@ async function updateAllRendered() {
   previewImg.src = url;
   previewFilenameEl.textContent = filename;
 
+  // Phase 9F — remember the latest preview for the Save-to-Drive button.
+  lastPreviewBlob = first.blob;
+  lastPreviewMeta = {
+    clientName:  first.item.raw.customerName || '',
+    reportTitle: first.data?.product || '',
+    reportId:    first.item.raw.policyNumber || '',
+    date:        first.item.raw.reportDate || '',
+  };
+  if (driveSaveBtn) driveSaveBtn.disabled = false;
+
   if (successes.length === 1) {
     downloadBtn.href = url;
     downloadBtn.download = filename;
@@ -395,4 +413,67 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
   );
+}
+
+// ── Phase 9F — Google Drive save/load wiring ─────────────────────
+// drive.js loads first and exposes window.ckgDriveSave / ckgDriveLoad.
+// Both are no-ops if the user isn't signed into the hub at ckgtools.com.
+function setSaveState(label, disabled) {
+  if (driveSaveLabel) driveSaveLabel.textContent = label;
+  if (driveSaveBtn)   driveSaveBtn.disabled = !!disabled;
+}
+
+if (driveSaveBtn) {
+  driveSaveBtn.disabled = true;  // becomes enabled once a preview exists
+  driveSaveBtn.addEventListener('click', async () => {
+    if (!lastPreviewBlob) return;
+    if (typeof window.ckgDriveSave !== 'function') {
+      console.warn('[Drive] ckgDriveSave unavailable — drive.js failed to load');
+      return;
+    }
+    setSaveState('Saving…', true);
+    try {
+      const out = await window.ckgDriveSave(lastPreviewBlob, lastPreviewMeta || {});
+      if (out && out.id) {
+        setSaveState('Saved to Drive', true);
+        setTimeout(() => setSaveState('Save to Drive', false), 2400);
+      } else {
+        setSaveState('Save failed', false);
+        setTimeout(() => setSaveState('Save to Drive', false), 2400);
+      }
+    } catch (e) {
+      console.error('[Drive] save threw:', e);
+      setSaveState('Save failed', false);
+      setTimeout(() => setSaveState('Save to Drive', false), 2400);
+    }
+  });
+}
+
+if (driveLoadBtn) {
+  driveLoadBtn.addEventListener('click', async () => {
+    if (typeof window.ckgDriveLoad !== 'function') {
+      console.warn('[Drive] ckgDriveLoad unavailable — drive.js failed to load');
+      return;
+    }
+    await window.ckgDriveLoad(({ blob, name }) => {
+      // Display the loaded image in the preview area. We don't replace
+      // the report data — this is a "quick look" surface for previously
+      // saved snapshots. User can re-render to get the live data view.
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      previewImg.src = url;
+      if (previewFilenameEl) previewFilenameEl.textContent = name || 'loaded-from-drive.png';
+      if (resultSection) resultSection.hidden = false;
+      // Hand the new blob to the download button so the user can re-save.
+      if (downloadBtn) {
+        downloadBtn.href = url;
+        downloadBtn.download = name || 'report.png';
+        if (downloadLabel) downloadLabel.textContent = 'Download PNG';
+      }
+      // Replace the in-memory blob so a follow-up Save-to-Drive saves
+      // this loaded image rather than the previous render.
+      lastPreviewBlob = blob;
+      lastPreviewMeta = { clientName: '', reportTitle: '', reportId: '', date: '' };
+    });
+  });
 }
