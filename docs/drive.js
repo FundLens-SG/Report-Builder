@@ -78,7 +78,17 @@
       console.warn('[CkgDrive] no Drive token available — sign into the hub at ckgtools.com first');
       return null;
     }
+    // Wire the shared folder helper's token getter to our token source.
+    // Idempotent — safe to set on every save.
+    if (!window._ckgGetDriveToken) window._ckgGetDriveToken = getValidToken;
     var filename = buildFilename(meta || {});
+    // Standardised destination: My Drive / CKGTools / ReportBuilder / Snapshots.
+    // Falls back to root if the shared helper is unavailable for any reason.
+    var parents = null;
+    if (window.ckgDriveFolders && typeof window.ckgDriveFolders.ensureSubfolder === 'function') {
+      try { parents = [await window.ckgDriveFolders.ensureSubfolder('report-builder', 'Snapshots')]; }
+      catch (e) { console.warn('[CkgDrive] folder helper failed, saving to root:', e && e.message); }
+    }
     var metadata = {
       name:        filename,
       mimeType:    blob.type || 'image/png',
@@ -91,6 +101,7 @@
         reportId:      String((meta && meta.reportId)    || ''),
       },
     };
+    if (parents) metadata.parents = parents;
     var boundary = '-------ckg' + Math.random().toString(36).slice(2);
     var delim    = '\r\n--' + boundary + '\r\n';
     var close    = '\r\n--' + boundary + '--';
