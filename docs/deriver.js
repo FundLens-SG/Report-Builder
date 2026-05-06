@@ -48,9 +48,17 @@ export function derive(raw, options = {}) {
   const premiumsRemaining = Math.max(0, flexiTerm - premiumsPaidCount);
 
   // Auto-detect bonus rates from the product/variation; allow caller overrides.
+  // For unrecognised products (e.g. Manulink Investor (II) - SRS) we treat the
+  // bonus rates as zero and IGNORE any caller overrides — the panel rates are
+  // configured for the *recognised* policy and shouldn't bleed onto Manulink
+  // policies in the same PDF, where there is no equivalent first-year bonus.
   const auto = lookupBonusRates(raw.product, raw.variation, annualPremium);
-  const welcomeBonusRate = options.welcomeBonusRate ?? auto.welcomeRate;
-  const annualPremiumBonusRate = options.annualPremiumBonusRate ?? auto.annualPremiumRate;
+  const welcomeBonusRate = auto.recognised
+    ? (options.welcomeBonusRate ?? auto.welcomeRate)
+    : 0;
+  const annualPremiumBonusRate = auto.recognised
+    ? (options.annualPremiumBonusRate ?? auto.annualPremiumRate)
+    : 0;
   const welcomeBonusAmount = round2(annualPremium * welcomeBonusRate);
   const annualPremiumBonusAmount = round2(annualPremium * annualPremiumBonusRate);
 
@@ -78,10 +86,16 @@ export function derive(raw, options = {}) {
     );
   }
 
-  const capitalPct = raw.accountValue
+  // capitalPct can exceed 100 when account value is below cost (a loss).
+  // Clamp the visual representation to [0, 100] so the progress bar fills
+  // sensibly, and surface a separate `lossPct` for the legend label.
+  const rawCapitalPct = raw.accountValue
     ? (adjustedCost / raw.accountValue) * 100
     : 0;
+  const inLoss = rawCapitalPct > 100;
+  const capitalPct = Math.min(100, rawCapitalPct);
   const gainsPct = Math.max(0, 100 - capitalPct);
+  const lossPct = inLoss ? rawCapitalPct - 100 : 0;
 
   const holdingsEnriched = enrichHoldings(raw.holdings, raw.accountValue);
   const fundPnlTotal = holdingsEnriched.reduce((s, h) => s + h.pnlDollar, 0);
@@ -130,6 +144,8 @@ export function derive(raw, options = {}) {
     premiumsRemaining,
     capitalPct: round1(capitalPct),
     gainsPct: round1(gainsPct),
+    inLoss,
+    lossPct: round1(lossPct),
     holdingsEnriched,
     fundPnlTotal,
     equityPct: round1(equityPct),

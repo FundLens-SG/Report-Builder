@@ -1,4 +1,8 @@
 // Parse a Manulife Customer Investment Report PDF in the browser via PDF.js.
+// Returns an ARRAY of policy reports — one entry per policy detected.
+// (A single PDF can contain multiple policies; e.g. one customer with both
+// an InvestReady (III) and a Manulink Investor (II) - SRS policy.)
+//
 // Mirrors src/parser.py: same regex patterns, same field extraction.
 
 import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
@@ -19,107 +23,160 @@ export async function parsePdf(arrayBuffer) {
     pageItems.push(content.items);
     pageTexts.push(reconstructText(content.items));
   }
-  // Only the first 3 pages carry policy data. Pages 4+ (glossary, disclaimers)
-  // contain the same labels in different contexts (e.g. "...]-1} X 100\n
-  // Annualised P&L (%) This reflects...") and would cause false-positive matches.
-  const fullText = pageTexts.slice(0, 3).join('\n');
 
-  // Each field has a list of regex patterns tried in order. Different PDF text
-  // extractors reorder Manulife's two-column layout differently — pdfplumber
-  // tends to put values above labels, PDF.js often puts values after labels on
-  // the same line — so we accept either form.
-  // `[ \t]+` matches inline whitespace ONLY — must NOT cross newlines.
-  // Bare `\s+` would jump to the next line and grab the wrong field's value
-  // (e.g. for Policy Investment Cost, it would latch onto the SGD value
-  // sitting on the Policy Investment Value row above).
-  const customerName = grabFirst(fullText, [
-    // Re-laid-out PDFs (scrambled fixture): name sits ON the same line as Manulife
+  const customer = parseCustomerLevel(pageTexts[0] || '');
+  const blocks = findPolicyBlocks(pageTexts);
+  if (!blocks.length) {
+    throw new Error('No policy section detected in PDF');
+  }
+
+  const policies = blocks.map(block => parsePolicyBlock(pageTexts, pageItems, block, customer));
+  // Surface a per-policy error inline rather than throwing the whole batch.
+  // Caller (app.js) only consumes successful policies; failures bubble up
+  // through `_error` so the file row can show what went wrong.
+  return policies;
+}
+
+
+// ---------- Page-level routing ------------------------------------------------
+
+const POLICY_HEADER_RE = /^[^\n]*?\(\s*\d{6,12}\s*\)\s+\(as of \d{1,2} \w+ \d{4}\)\s*$/m;
+const POLICY_NUMBER_FIELD_RE = /Policy Number[ \t]+\d{6,12}|^\s*\d{6,12}[ \t]+SGD[ \t]+-?[\d,]+\.\d{2}\s*\n[^\n]*Policy Number/m;
+
+// A page is a "policy info page" if it has the "<Product> (POLICYNUM) (as of
+// DATE)" header AND/OR a "Policy Number <NNNN>" field. We accept either form
+// so that re-laid-out PDFs (e.g. the scrambled fixture, where the header
+// policy number can drift during redaction) are still recognised. The
+// corresponding holdings table is on the next page.
+function findPolicyBlocks(pageTexts) {
+  const blocks = [];
+  for (let i = 1; i < pageTexts.length; i++) {
+    const text = pageTexts[i];
+    if (!text) continue;
+    if (POLICY_HEADER_RE.test(text) || POLICY_NUMBER_FIELD_RE.test(text)) {
+      blocks.push({ infoPage: i, holdingsPage: i + 1 });
+    }
+  }
+  return blocks;
+}
+
+
+// ---------- Customer-level fields (shared across all policies) ---------------
+
+function parseCustomerLevel(page1Text) {
+  const customerName = grabFirst(page1Text, [
     /^([A-Z][A-Z ]+[A-Z])[ \t]+Manulife[ \t]*\(Singapore\)/m,
-    // Original Manulife PDFs: name on its OWN line between "Pte. Ltd." and the address
     /Manulife[ \t]*\(Singapore\)[ \t]+Pte\.[ \t]*Ltd\.[^\n]*\n[ \t]*([A-Z][A-Z ]{1,}[A-Z])[ \t]*\n/,
   ]);
-  const reportDate = grabFirst(fullText, [
+  const reportDate = grabFirst(page1Text, [
     /Customer Total Policy Holdings\s*\(as of (\d{1,2} \w+ \d{4})\)/,
   ]);
-  const policyName = grabFirst(fullText, [
-    /Policy Name[ \t]+(Manulife InvestReady[^\n]+?Flexi[ \t]+\d+)/,
-    /(Manulife InvestReady[^\n]+?Flexi[ \t]+\d+)[ \t]+SGD[ \t]+[\d,]+\.\d{2}\s*\n[^\n]*Policy Name/,
+  const riskProfile = grabFirst(page1Text, [
+    /Risk Profile Questionnaire[ \t]+(\w+)/,
+    /^(\w+)[ \t]+Total Investment Value\s*\n\s*Risk Profile Questionnaire/m,
   ]);
-  const policyNumber = grabFirst(fullText, [
+  const ckaStatus = grabFirst(page1Text, [
+    /Customer Knowledge Assessment[ \t]+(\w+)[ \t]+Total Market Value/,
+    /Customer Knowledge Assessment[ \t]+(\w+)/,
+  ]);
+  // First "(Expiry date: ...)" after CKA. JS dotall via `[\s\S]`.
+  const ckaExpiry = grabFirst(page1Text, [
+    /Customer Knowledge Assessment[\s\S]*?\(Expiry date:\s+(\d{2}\/\d{2}\/\d{4})\)/,
+  ]);
+
+  const required = { customerName, reportDate, riskProfile, ckaStatus, ckaExpiry };
+  const missing = Object.entries(required).filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length) {
+    throw new Error(`Missing customer-level fields in PDF: ${missing.join(', ')}`);
+  }
+  return required;
+}
+
+
+// ---------- Per-policy parser ------------------------------------------------
+
+function parsePolicyBlock(pageTexts, pageItems, block, customer) {
+  // Use only the policy's info page for regex matching — searching the
+  // whole document would let one policy's value match another policy's
+  // label (e.g. policy 2's Account Value matched against policy 1's row).
+  const text = pageTexts[block.infoPage] || '';
+
+  // `[ \t]+` matches inline whitespace ONLY — it must NOT cross newlines.
+  // Bare `\s+` would jump to the next line and grab the wrong field's value.
+  const policyName = grabFirst(text, [
+    // Original Manulife layout (PDF.js): "Policy Name <name> Account Value SGD ..."
+    /Policy Name[ \t]+(.+?)[ \t]+Account Value[ \t]+SGD/,
+    // Re-laid-out / pdfplumber layout: name on previous line, then "Policy Name" label
+    /^([^\n]+?)[ \t]+SGD[ \t]+-?[\d,]+\.\d{2}\s*\n[^\n]*Policy Name/m,
+  ]);
+  const policyNumber = grabFirst(text, [
     /Policy Number[ \t]+(\d{6,12})/,
-    /(\d{6,12})[ \t]+SGD[ \t]+[\d,]+\.\d{2}\s*\n[^\n]*Policy Number/,
+    /(\d{6,12})[ \t]+SGD[ \t]+-?[\d,]+\.\d{2}\s*\n[^\n]*Policy Number/,
   ]);
-  const policyIssueDate = grabFirst(fullText, [
+  const policyIssueDate = grabFirst(text, [
     /Policy Issue Date[ \t]+(\d{2}\/\d{2}\/\d{4})/,
     /(\d{2}\/\d{2}\/\d{4})[ \t]+Total Rider Premiums\s*\n\s*Policy Issue Date/,
     /^[ \t]*(\d{2}\/\d{2}\/\d{4})\s*\n\s*Policy Issue Date/m,
   ]);
 
-  const accountValue = grabMoneyFirst(fullText, [
-    /Account Value[ \t]+SGD[ \t]+([\d,]+\.\d{2})/,
-    /SGD[ \t]+([\d,]+\.\d{2})\s*\n[^\n]*Account Value/,
+  const accountValue = grabMoneyFirst(text, [
+    /Account Value[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})/,
+    /SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n[^\n]*Account Value/,
   ]);
-  const policyInvestmentCost = grabMoneyFirst(fullText, [
-    /Policy Investment Cost\*?[ \t]+SGD[ \t]+([\d,]+\.\d{2})/,
-    /SGD[ \t]+([\d,]+\.\d{2})\s*\n[^\n]*Policy Investment Cost/,
+  const policyInvestmentCost = grabMoneyFirst(text, [
+    /Policy Investment Cost\*?[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})/,
+    /SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n[^\n]*Policy Investment Cost/,
   ]);
-  const totalPnlDollar = grabMoneyFirst(fullText, [
-    /Total P&L \(\$\)[ \t]+SGD[ \t]+([\d,]+\.\d{2})/,
-    /SGD[ \t]+([\d,]+\.\d{2})\s*\n\s*Total P&L \(\$\)/,
+  const totalPnlDollar = grabMoneyFirst(text, [
+    /Total P&L \(\$\)[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})/,
+    /SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n\s*Total P&L \(\$\)/,
   ]);
-  const totalRiderPremiums = grabMoneyFirst(fullText, [
-    /Total Rider Premiums[ \t]+SGD[ \t]+([\d,]+\.\d{2})/,
-    /SGD[ \t]+([\d,]+\.\d{2})\s*\n[^\n]*Total Rider Premiums/,
+  const totalRiderPremiums = grabMoneyFirst(text, [
+    /Total Rider Premiums[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})/,
+    /SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n[^\n]*Total Rider Premiums/,
   ]);
-  const totalDividendsReinvested = grabMoneyFirst(fullText, [
-    /Total Dividends Reinvested[ \t]+SGD[ \t]+([\d,]+\.\d{2})/,
-    /SGD[ \t]+([\d,]+\.\d{2})\s*\n\s*Total Dividends Reinvested/,
+  const totalDividendsReinvested = grabMoneyFirst(text, [
+    /Total Dividends Reinvested[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})/,
+    /SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n\s*Total Dividends Reinvested/,
   ]);
 
-  const totalPnlPct = parseFloat(grabFirst(fullText, [
-    /Total P&L \(%\)[ \t]+([\d.]+)/,
-    /^([\d.]+)\s*\n\s*Total P&L \(%\)/m,
+  const totalPnlPct = parseFloat(grabFirst(text, [
+    /Total P&L \(%\)[ \t]+(-?[\d.]+)/,
+    /^(-?[\d.]+)\s*\n\s*Total P&L \(%\)/m,
   ]) || '0');
-  const annualisedPnlPct = parseFloat(grabFirst(fullText, [
-    /Annualised P&L \(%\)[ \t]+([\d.]+)/,
-    /^([\d.]+)\s*\n\s*Annualised P&L \(%\)/m,
+  const annualisedPnlPct = parseFloat(grabFirst(text, [
+    /Annualised P&L \(%\)[ \t]+(-?[\d.]+)/,
+    /^(-?[\d.]+)\s*\n\s*Annualised P&L \(%\)/m,
   ]) || '0');
 
-  const riskProfile = grabFirst(fullText, [
-    /Risk Profile Questionnaire[ \t]+(\w+)/,
-    /^(\w+)[ \t]+Total Investment Value\s*\n\s*Risk Profile Questionnaire/m,
-  ]);
-  const ckaStatus = grabFirst(fullText, [
-    /Customer Knowledge Assessment[ \t]+(\w+)[ \t]+Total Market Value/,
-    /Customer Knowledge Assessment[ \t]+(\w+)/,
-  ]);
-  // Two "(Expiry date: ...)" lines exist (CKA + Risk Profile). The first one
-  // after "Customer Knowledge Assessment" is the CKA expiry. Use a non-greedy
-  // dotall match — JS regex needs the `s` flag for `.` to match newlines.
-  const ckaExpiry = grabFirst(fullText, [
-    /Customer Knowledge Assessment[\s\S]*?\(Expiry date:\s+(\d{2}\/\d{2}\/\d{4})\)/,
-  ]);
-
-  const required = { customerName, reportDate, policyName, policyNumber, policyIssueDate, riskProfile, ckaStatus, ckaExpiry };
+  const required = { policyName, policyNumber, policyIssueDate };
   const missing = Object.entries(required).filter(([, v]) => !v).map(([k]) => k);
   if (missing.length) {
-    throw new Error(`Missing required fields in PDF: ${missing.join(', ')}`);
+    throw new Error(`Missing policy fields on page ${block.infoPage + 1}: ${missing.join(', ')}`);
   }
 
-  const holdings = parseHoldings(pageItems);
+  const holdings = parseHoldingsFromPageItems(pageItems[block.holdingsPage]);
   if (!holdings.length) {
-    throw new Error('No fund holdings detected on page 3');
+    throw new Error(`No fund holdings detected on page ${block.holdingsPage + 1}`);
   }
 
   const { product, variation } = detectProductAndVariation(policyName);
 
   return {
-    customerName, reportDate, policyName, policyNumber, policyIssueDate,
-    accountValue, policyInvestmentCost, totalPnlDollar, totalPnlPct, annualisedPnlPct,
-    totalRiderPremiums, totalDividendsReinvested,
-    riskProfile, ckaStatus, ckaExpiry,
+    ...customer,
+    policyName,
+    policyNumber,
+    policyIssueDate,
+    accountValue,
+    policyInvestmentCost,
+    totalPnlDollar,
+    totalPnlPct,
+    annualisedPnlPct,
+    totalRiderPremiums,
+    totalDividendsReinvested,
     holdings,
-    product, variation,
+    product,
+    variation,
   };
 }
 
@@ -130,8 +187,6 @@ export async function parsePdf(arrayBuffer) {
 // line-based text, we cluster items by y-coordinate and sort within each line by x.
 function reconstructText(items) {
   if (!items.length) return '';
-  // Each item: { str, transform: [a,b,c,d,tx,ty], width, ... }
-  // ty is the baseline y (PDF coord, origin at bottom-left).
   const placed = items.map(it => ({
     str: it.str,
     x: it.transform[4],
@@ -139,10 +194,9 @@ function reconstructText(items) {
     h: it.height || it.transform[3] || 10,
   })).filter(it => it.str !== undefined);
 
-  // Group into lines by y-coordinate (within ~ half line height tolerance)
   placed.sort((a, b) => b.y - a.y);  // top to bottom
   const lines = [];
-  const tolerance = 3;  // px
+  const tolerance = 3;
   for (const it of placed) {
     const last = lines[lines.length - 1];
     if (last && Math.abs(last.y - it.y) <= tolerance) {
@@ -173,24 +227,15 @@ function estimateWidth(str, h) {
 // ---------- Holdings parsing --------------------------------------------------
 
 const TICKER_RE = /\(([A-Z]{3,5})\)\s*$/;
-const NUMERIC_RE = /^[\d,]+\.\d+(?:\s*\d+)?$/;
+// Numeric cells can be negative (e.g. "-170.11" P&L) and may include trailing
+// digits that pdfplumber/PDF.js wrap onto the next line ("3,326.3300\n0").
+const NUMERIC_RE = /^-?[\d,]+\.\d+(?:\s*\d+)?$/;
 
-function parseHoldings(pageItems) {
-  // PDF.js gives us word-level items, not pre-grouped cells. We:
-  //   1. Cluster items into rows by y-coordinate
-  //   2. Walk rows: header rows end with "(TICKER)", data rows have ≥5 numerics
-  //   3. For each data row, also pick up wrap-text from the row immediately
-  //      below (e.g. "Fixed Income\nRegional" splits across two y-rows)
-  //   4. Within the data row, cluster non-numeric words into x-position
-  //      "columns" — typically gives 2 columns: asset class + sub-asset class
-  for (let p = 2; p < pageItems.length && p < 5; p++) {
-    const items = pageItems[p];
-    if (!items?.length) continue;
-    const rows = clusterIntoRows(items);
-    const holdings = extractHoldingsFromRows(rows);
-    if (holdings.length) return holdings;
-  }
-  return [];
+
+function parseHoldingsFromPageItems(items) {
+  if (!items?.length) return [];
+  const rows = clusterIntoRows(items);
+  return extractHoldingsFromRows(rows);
 }
 
 function clusterIntoRows(items) {
@@ -208,15 +253,12 @@ function clusterIntoRows(items) {
     if (last && Math.abs(last[0].y - it.y) <= tolerance) last.push(it);
     else rows.push([it]);
   }
-  rows.forEach(r => {
-    r.sort((a, b) => a.x - b.x);
-  });
+  rows.forEach(r => r.sort((a, b) => a.x - b.x));
   return rows.map(mergeSplitNumbers);
 }
 
 // PDF.js sometimes emits "13,737.79" as two adjacent text items: "13,737"
-// then ".79". When the gap is small and the second piece is just a decimal
-// fragment, glue them back together so downstream numeric parsing works.
+// then ".79". Glue them back together when the gap is small.
 function mergeSplitNumbers(row) {
   const out = [];
   for (let i = 0; i < row.length; i++) {
@@ -257,8 +299,6 @@ function extractHoldingsFromRows(rows) {
 
     const nums = row.filter(c => NUMERIC_RE.test(c.text));
     if (pendingHeader && nums.length >= 5) {
-      // Look one row down for wrap-text (e.g. NEMD splits "Fixed Income"
-      // across data row + "Regional" on the next visual row).
       const wrapTexts = [];
       const next = rows[i + 1];
       if (next) {
@@ -294,9 +334,6 @@ function buildHoldingFromRow(header, row, wrapTexts) {
   if (allTexts.length < 2) return null;
 
   // Cluster words into columns by x-proximity (gap > 25px starts a new column).
-  // Within asset/sub-asset class words, the largest legitimate within-column
-  // gap I've seen is ~23px ("Markets Bond"); the smallest between-column gap
-  // is ~27px ("Assets" -> "Multi"). 25 splits cleanly.
   allTexts.sort((a, b) => a.x - b.x);
   const clusters = [];
   for (const t of allTexts) {
@@ -310,8 +347,6 @@ function buildHoldingFromRow(header, row, wrapTexts) {
   }
   if (clusters.length < 2) return null;
 
-  // Within each cluster, restore reading order: data row first (higher y),
-  // wrap row second (lower y); within each row, left-to-right by x.
   const groupTexts = clusters.map(c => {
     c.items.sort((a, b) => (b.y - a.y) || (a.x - b.x));
     return cleanupColumnText(c.items.map(it => it.text).join(' '));
@@ -329,9 +364,6 @@ function buildHoldingFromRow(header, row, wrapTexts) {
 }
 
 function cleanupColumnText(s) {
-  // PDF.js splits "Mixed/Multi-Assets" into ["Mixed/", "Multi-", "Assets"];
-  // when joined with spaces we get "Mixed/ Multi- Assets". Collapse the
-  // spaces that follow a hyphen or slash so the canonical form is restored.
   return s.replace(/([\/\-])\s+/g, '$1').replace(/\s+/g, ' ').trim();
 }
 

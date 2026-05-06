@@ -1,4 +1,9 @@
-"""Parse a Manulife Customer Investment Report PDF into a RawReport dataclass."""
+"""Parse a Manulife Customer Investment Report PDF into one or more RawReports.
+
+A single PDF can contain multiple policies (one customer, two ILPs, etc.).
+`parse_pdf()` returns a list — one entry per policy detected. For backward
+compatibility, the legacy `parse_pdf_single()` returns just the first policy.
+"""
 
 from __future__ import annotations
 
@@ -40,10 +45,12 @@ class RawReport:
     holdings: list[Holding] = field(default_factory=list)
 
 
+# ---------- Helpers ----------------------------------------------------------
+
 def _to_float(s: Optional[str]) -> float:
     if not s:
         return 0.0
-    # Manulife wraps long numbers across cell rows, e.g. "3,326.3300\n0" really means 3326.33000.
+    # Manulife wraps long numbers across cell rows: "3,326.3300\n0" means 3326.33000.
     cleaned = re.sub(r"\s+", "", s).replace(",", "")
     return float(cleaned)
 
@@ -61,131 +68,167 @@ def _grab_first(text: str, patterns: list[str], flags: int = 0) -> Optional[str]
     return None
 
 
-def _grab_money(text: str, pattern: str) -> float:
-    return _to_float(_grab(text, pattern))
-
-
 def _grab_money_first(text: str, patterns: list[str], flags: int = 0) -> float:
     return _to_float(_grab_first(text, patterns, flags=flags))
 
 
-def parse_pdf(pdf_path: str) -> RawReport:
-    """Parse a Manulife PDF into a RawReport.
+# ---------- Page-level routing ----------------------------------------------
 
-    The Manulife PDF uses a font where 'fi' ligatures sometimes drop in extraction
-    ("Profit" -> "Proft", "figures" -> "fgures"). Patterns must tolerate both.
+POLICY_HEADER_RE = re.compile(
+    r"^[^\n]*?\(\s*\d{6,12}\s*\)\s+\(as of \d{1,2} \w+ \d{4}\)\s*$",
+    re.MULTILINE,
+)
+POLICY_NUMBER_FIELD_RE = re.compile(
+    r"Policy Number[ \t]+\d{6,12}|^\s*\d{6,12}[ \t]+SGD[ \t]+-?[\d,]+\.\d{2}\s*\n[^\n]*Policy Number",
+    re.MULTILINE,
+)
+
+
+def _find_policy_blocks(pages_text: list[str]) -> list[tuple[int, int]]:
+    """Return [(info_page_idx, holdings_page_idx)] for each policy detected.
+
+    A page is a "policy info page" if it contains either:
+      - the "<Product> (POLICYNUM) (as of DATE)" header line, OR
+      - a "Policy Number <NNNN>" field (catches re-laid-out PDFs where the
+        header policy number may have drifted).
+    The holdings table is on the page that immediately follows.
     """
-    with pdfplumber.open(pdf_path) as pdf:
-        pages_text = [p.extract_text() or "" for p in pdf.pages]
-        # Only the first 3 pages carry policy data. The glossary on page 4
-        # contains the same labels in different contexts (e.g. "...]-1} X 100\n
-        # Annualised P&L (%) This reflects...") and would cause false-positive
-        # matches if included.
-        full_text = "\n".join(pages_text[:3])
-        holdings = _parse_holdings_from_tables(pdf)
+    blocks: list[tuple[int, int]] = []
+    for i in range(1, len(pages_text)):
+        text = pages_text[i]
+        if not text:
+            continue
+        if POLICY_HEADER_RE.search(text) or POLICY_NUMBER_FIELD_RE.search(text):
+            blocks.append((i, i + 1))
+    return blocks
 
-    # Two layouts to handle:
-    #  - Original Manulife PDF: label and value on the same line, value AFTER
-    #    the label (e.g. "Policy Investment Cost* SGD 30,000.00").
-    #  - Re-laid-out PDFs (scrambled fixtures, certain pdfplumber outputs):
-    #    value on the line ABOVE the label, second-column value tacked onto
-    #    the same line as the first column's value.
-    # We try the more specific "label-then-value" form first; if that doesn't
-    # match, fall back to "value-above-label". The label-first ordering is
-    # critical for Policy Investment Cost / Total Dividends Reinvested whose
-    # preceding lines also end with SGD amounts (different field) — without it
-    # the fallback would greedily latch onto the wrong figure.
-    # `[ \t]+` matches inline whitespace ONLY — it must NOT cross newlines.
-    # Bare `\s+` would jump to the next line and accidentally grab the wrong
-    # field's value (e.g. Policy Investment Cost would latch onto the SGD
-    # amount sitting one line above on the Policy Investment Value row).
+
+# ---------- Customer-level fields (shared across all policies) --------------
+
+def _parse_customer_level(page1_text: str) -> dict:
     customer_name = _grab_first(
-        full_text,
+        page1_text,
         [
             r"^([A-Z][A-Z ]+[A-Z])[ \t]+Manulife[ \t]*\(Singapore\)",
             r"Manulife[ \t]*\(Singapore\)[ \t]+Pte\.[ \t]*Ltd\.[^\n]*\n[ \t]*([A-Z][A-Z ]{1,}[A-Z])[ \t]*\n",
         ],
         flags=re.MULTILINE,
     )
-    report_date = _grab(full_text, r"Customer Total Policy Holdings\s*\(as of (\d{1,2} \w+ \d{4})\)")
-    policy_name = _grab_first(full_text, [
-        r"Policy Name[ \t]+(Manulife InvestReady[^\n]+?Flexi[ \t]+\d+)",
-        r"(Manulife InvestReady[^\n]+?Flexi[ \t]+\d+)[ \t]+SGD[ \t]+[\d,]+\.\d{2}\s*\n[^\n]*Policy Name",
+    report_date = _grab(
+        page1_text,
+        r"Customer Total Policy Holdings\s*\(as of (\d{1,2} \w+ \d{4})\)",
+    )
+    risk_profile = _grab_first(page1_text, [
+        r"Risk Profile Questionnaire[ \t]+(\w+)",
+        r"^(\w+)[ \t]+Total Investment Value\s*\n\s*Risk Profile Questionnaire",
+    ], flags=re.MULTILINE)
+    cka_status = _grab_first(page1_text, [
+        r"Customer Knowledge Assessment[ \t]+(\w+)[ \t]+Total Market Value",
+        r"Customer Knowledge Assessment[ \t]+(\w+)",
     ])
-    policy_number = _grab_first(full_text, [
+    cka_expiry = _grab(
+        page1_text,
+        r"Customer Knowledge Assessment[\s\S]*?\(Expiry date:\s+(\d{2}/\d{2}/\d{4})\)",
+    )
+
+    missing = [name for name, val in [
+        ("customer_name", customer_name),
+        ("report_date", report_date),
+        ("risk_profile", risk_profile),
+        ("cka_status", cka_status),
+        ("cka_expiry", cka_expiry),
+    ] if not val]
+    if missing:
+        raise ValueError(f"Missing customer-level fields in PDF: {', '.join(missing)}")
+
+    return dict(
+        customer_name=customer_name,
+        report_date=report_date,
+        risk_profile=risk_profile,
+        cka_status=cka_status,
+        cka_expiry=cka_expiry,
+    )
+
+
+# ---------- Per-policy parser -----------------------------------------------
+
+def _parse_policy_block(
+    pages_text: list[str],
+    pdf,
+    block: tuple[int, int],
+    customer: dict,
+) -> RawReport:
+    info_idx, holdings_idx = block
+    text = pages_text[info_idx] if info_idx < len(pages_text) else ""
+
+    # `[ \t]+` matches inline whitespace ONLY — must NOT cross newlines.
+    # Bare `\s+` would jump to the next line and grab the wrong field's value
+    # (e.g. for Policy Investment Cost, latch onto the SGD on the row above).
+    policy_name = _grab_first(text, [
+        r"Policy Name[ \t]+(.+?)[ \t]+Account Value[ \t]+SGD",
+        r"^([^\n]+?)[ \t]+SGD[ \t]+-?[\d,]+\.\d{2}\s*\n[^\n]*Policy Name",
+    ], flags=re.MULTILINE)
+    policy_number = _grab_first(text, [
         r"Policy Number[ \t]+(\d{6,12})",
-        r"(\d{6,12})[ \t]+SGD[ \t]+[\d,]+\.\d{2}\s*\n[^\n]*Policy Number",
+        r"(\d{6,12})[ \t]+SGD[ \t]+-?[\d,]+\.\d{2}\s*\n[^\n]*Policy Number",
     ])
-    policy_issue_date = _grab_first(full_text, [
+    policy_issue_date = _grab_first(text, [
         r"Policy Issue Date[ \t]+(\d{2}/\d{2}/\d{4})",
         r"(\d{2}/\d{2}/\d{4})[ \t]+Total Rider Premiums\s*\n\s*Policy Issue Date",
         r"^[ \t]*(\d{2}/\d{2}/\d{4})\s*\n\s*Policy Issue Date",
     ], flags=re.MULTILINE)
 
-    account_value = _grab_money_first(full_text, [
-        r"Account Value[ \t]+SGD[ \t]+([\d,]+\.\d{2})",
-        r"SGD[ \t]+([\d,]+\.\d{2})\s*\n[^\n]*Account Value",
+    account_value = _grab_money_first(text, [
+        r"Account Value[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})",
+        r"SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n[^\n]*Account Value",
     ])
-    policy_investment_cost = _grab_money_first(full_text, [
-        r"Policy Investment Cost\*?[ \t]+SGD[ \t]+([\d,]+\.\d{2})",
-        r"SGD[ \t]+([\d,]+\.\d{2})\s*\n[^\n]*Policy Investment Cost",
+    policy_investment_cost = _grab_money_first(text, [
+        r"Policy Investment Cost\*?[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})",
+        r"SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n[^\n]*Policy Investment Cost",
     ])
-    total_pnl_dollar = _grab_money_first(full_text, [
-        r"Total P&L \(\$\)[ \t]+SGD[ \t]+([\d,]+\.\d{2})",
-        r"SGD[ \t]+([\d,]+\.\d{2})\s*\n\s*Total P&L \(\$\)",
+    total_pnl_dollar = _grab_money_first(text, [
+        r"Total P&L \(\$\)[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})",
+        r"SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n\s*Total P&L \(\$\)",
     ])
-    total_rider_premiums = _grab_money_first(full_text, [
-        r"Total Rider Premiums[ \t]+SGD[ \t]+([\d,]+\.\d{2})",
-        r"SGD[ \t]+([\d,]+\.\d{2})\s*\n[^\n]*Total Rider Premiums",
+    total_rider_premiums = _grab_money_first(text, [
+        r"Total Rider Premiums[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})",
+        r"SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n[^\n]*Total Rider Premiums",
     ])
-    total_dividends_reinvested = _grab_money_first(full_text, [
-        r"Total Dividends Reinvested[ \t]+SGD[ \t]+([\d,]+\.\d{2})",
-        r"SGD[ \t]+([\d,]+\.\d{2})\s*\n\s*Total Dividends Reinvested",
+    total_dividends_reinvested = _grab_money_first(text, [
+        r"Total Dividends Reinvested[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})",
+        r"SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n\s*Total Dividends Reinvested",
     ])
 
-    total_pnl_pct = float(_grab_first(full_text, [
-        r"Total P&L \(%\)[ \t]+([\d.]+)",
-        r"^([\d.]+)\s*\n\s*Total P&L \(%\)",
+    total_pnl_pct = float(_grab_first(text, [
+        r"Total P&L \(%\)[ \t]+(-?[\d.]+)",
+        r"^(-?[\d.]+)\s*\n\s*Total P&L \(%\)",
     ], flags=re.MULTILINE) or 0)
-    annualised_pnl_pct = float(_grab_first(full_text, [
-        r"Annualised P&L \(%\)[ \t]+([\d.]+)",
-        r"^([\d.]+)\s*\n\s*Annualised P&L \(%\)",
+    annualised_pnl_pct = float(_grab_first(text, [
+        r"Annualised P&L \(%\)[ \t]+(-?[\d.]+)",
+        r"^(-?[\d.]+)\s*\n\s*Annualised P&L \(%\)",
     ], flags=re.MULTILINE) or 0)
 
-    risk_profile = _grab_first(full_text, [
-        r"Risk Profile Questionnaire[ \t]+(\w+)",
-        r"^(\w+)[ \t]+Total Investment Value\s*\n\s*Risk Profile Questionnaire",
-    ], flags=re.MULTILINE)
-    cka_status = _grab_first(full_text, [
-        r"Customer Knowledge Assessment[ \t]+(\w+)[ \t]+Total Market Value",
-        r"Customer Knowledge Assessment[ \t]+(\w+)",
-    ])
-    cka_expiry = _grab(
-        full_text,
-        r"Customer Knowledge Assessment[\s\S]*?\(Expiry date:\s+(\d{2}/\d{2}/\d{4})\)",
-    )
-
-    missing = [
-        name for name, val in [
-            ("customer_name", customer_name),
-            ("report_date", report_date),
-            ("policy_name", policy_name),
-            ("policy_number", policy_number),
-            ("policy_issue_date", policy_issue_date),
-            ("risk_profile", risk_profile),
-            ("cka_status", cka_status),
-            ("cka_expiry", cka_expiry),
-        ]
-        if not val
-    ]
+    missing = [name for name, val in [
+        ("policy_name", policy_name),
+        ("policy_number", policy_number),
+        ("policy_issue_date", policy_issue_date),
+    ] if not val]
     if missing:
-        raise ValueError(f"Missing required fields in PDF: {', '.join(missing)}")
+        raise ValueError(
+            f"Missing policy fields on page {info_idx + 1}: {', '.join(missing)}"
+        )
+
+    holdings = (
+        _holdings_from_page(pdf.pages[holdings_idx])
+        if holdings_idx < len(pdf.pages)
+        else []
+    )
     if not holdings:
-        raise ValueError("No fund holdings detected on page 3")
+        raise ValueError(f"No fund holdings detected on page {holdings_idx + 1}")
 
     return RawReport(
-        customer_name=customer_name,
-        report_date=report_date,
+        customer_name=customer["customer_name"],
+        report_date=customer["report_date"],
         policy_name=policy_name,
         policy_number=policy_number,
         policy_issue_date=policy_issue_date,
@@ -196,42 +239,49 @@ def parse_pdf(pdf_path: str) -> RawReport:
         annualised_pnl_pct=annualised_pnl_pct,
         total_rider_premiums=total_rider_premiums,
         total_dividends_reinvested=total_dividends_reinvested,
-        risk_profile=risk_profile,
-        cka_status=cka_status,
-        cka_expiry=cka_expiry,
+        risk_profile=customer["risk_profile"],
+        cka_status=customer["cka_status"],
+        cka_expiry=customer["cka_expiry"],
         holdings=holdings,
     )
 
 
+def parse_pdf(pdf_path: str) -> list[RawReport]:
+    """Parse a Manulife PDF into a list of RawReports — one per policy."""
+    with pdfplumber.open(pdf_path) as pdf:
+        pages_text = [p.extract_text() or "" for p in pdf.pages]
+        customer = _parse_customer_level(pages_text[0] if pages_text else "")
+        blocks = _find_policy_blocks(pages_text)
+        if not blocks:
+            raise ValueError("No policy section detected in PDF")
+        return [_parse_policy_block(pages_text, pdf, b, customer) for b in blocks]
+
+
+def parse_pdf_single(pdf_path: str) -> RawReport:
+    """Backward-compatible wrapper — returns the first policy in the PDF."""
+    policies = parse_pdf(pdf_path)
+    return policies[0]
+
+
+# ---------- Holdings parsing -------------------------------------------------
+
 _TICKER_RE = re.compile(r"\(([A-Z]{3,5})\)\s*$")
-
-
-def _parse_holdings_from_tables(pdf) -> list[Holding]:
-    """Extract Fund Holdings from page 3.
-
-    Approach: locate the holdings table via its header row ("Fund Value", "Total P&L ($)",
-    "Total P&L (%)"), record which column index each label sits at, then read each
-    fund's data row by indexing those columns. This is more robust than positional
-    "take the Nth numeric" because pdfplumber sometimes splits a single visual column
-    into adjacent cells (which happens when a PDF has been edited with overlay text).
-    """
-    holdings: list[Holding] = []
-    if len(pdf.pages) < 3:
-        return holdings
-
-    for page in pdf.pages[2:]:
-        for table in page.extract_tables() or []:
-            holdings.extend(_holdings_from_table(table))
-        if holdings:
-            break
-    return holdings
-
-
+_NUMERIC_RE = re.compile(r"-?[\d,]+\.\d+(?:\s*\d+)?")
 _FIELD_LABELS = {
     "fund_value": ("fund value",),
     "pnl_dollar": ("total p&l\n($)", "total p&l ($)"),
     "pnl_pct": ("total p&l\n(%)", "total p&l (%)"),
 }
+
+
+def _holdings_from_page(page) -> list[Holding]:
+    """Extract Holdings from a single page's tables."""
+    out: list[Holding] = []
+    for table in page.extract_tables() or []:
+        out.extend(_holdings_from_table(table))
+        if out:
+            break
+    return out
 
 
 def _holdings_from_table(table: list[list[Optional[str]]]) -> list[Holding]:
@@ -272,15 +322,12 @@ def _build_column_map(header_row: list[Optional[str]]) -> dict[str, int]:
         if not raw:
             continue
         norm = raw.lower().strip()
-        for field, labels in _FIELD_LABELS.items():
-            if field in out:
+        for field_name, labels in _FIELD_LABELS.items():
+            if field_name in out:
                 continue
             if any(label in norm for label in labels):
-                out[field] = idx
+                out[field_name] = idx
     return out
-
-
-_NUMERIC_RE = re.compile(r"[\d,]+\.\d+(?:\s*\d+)?")
 
 
 def _looks_like_data_row(cells: list[str]) -> bool:
@@ -289,7 +336,11 @@ def _looks_like_data_row(cells: list[str]) -> bool:
     return numeric >= 3
 
 
-def _build_holding(header: tuple[str, str], cells: list[str], column_map: dict[str, int]) -> Optional[Holding]:
+def _build_holding(
+    header: tuple[str, str],
+    cells: list[str],
+    column_map: dict[str, int],
+) -> Optional[Holding]:
     full_name, ticker = header
 
     fund_value = _read_numeric(cells, column_map["fund_value"])
@@ -318,8 +369,8 @@ def _build_holding(header: tuple[str, str], cells: list[str], column_map: dict[s
 def _read_numeric(cells: list[str], col_idx: int) -> Optional[float]:
     """Return the first numeric value at or after `col_idx`, skipping empty cells.
 
-    pdfplumber sometimes splits a column into 2-3 sub-cells; the value sits in the
-    first non-empty one. We scan forward at most a few cells from the header column.
+    pdfplumber sometimes splits a column into 2-3 sub-cells; the value sits in
+    the first non-empty one. We scan forward at most a few cells.
     """
     for i in range(col_idx, min(col_idx + 4, len(cells))):
         cell = (cells[i] or "").replace("\n", " ").strip()

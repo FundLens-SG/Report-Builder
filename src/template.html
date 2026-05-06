@@ -58,17 +58,17 @@
   <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 1.25rem;">
     <div style="background: var(--bg-secondary); border-radius: var(--radius-md); padding: 14px;">
       <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">Net gain</p>
-      <p style="font-size: 22px; font-weight: 500; color: var(--text-success); line-height: 1.1;">+S${{ "{:,.2f}".format(total_pnl_dollar) }}</p>
+      <p style="font-size: 22px; font-weight: 500; color: {{ '#A4262C' if total_pnl_dollar < 0 else 'var(--text-success)' }}; line-height: 1.1;">{{ '−S$' if total_pnl_dollar < 0 else '+S$' }}{{ "{:,.2f}".format(total_pnl_dollar|abs) }}</p>
       <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 6px;">from S${{ "{:,.0f}".format(policy_investment_cost) }} invested</p>
     </div>
     <div style="background: var(--bg-secondary); border-radius: var(--radius-md); padding: 14px;">
       <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">Total return</p>
-      <p style="font-size: 22px; font-weight: 500; color: var(--text-success); line-height: 1.1;">+{{ "%.2f"|format(total_pnl_pct) }}%</p>
+      <p style="font-size: 22px; font-weight: 500; color: {{ '#A4262C' if total_pnl_pct < 0 else 'var(--text-success)' }}; line-height: 1.1;">{{ '−' if total_pnl_pct < 0 else '+' }}{{ "%.2f"|format(total_pnl_pct|abs) }}%</p>
       <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 6px;">absolute, since inception</p>
     </div>
     <div style="background: var(--bg-secondary); border-radius: var(--radius-md); padding: 14px;">
       <p style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">Annualised IRR</p>
-      <p style="font-size: 22px; font-weight: 500; color: var(--text-success); line-height: 1.1;">+{{ "%.2f"|format(annualised_pnl_pct) }}%</p>
+      <p style="font-size: 22px; font-weight: 500; color: {{ '#A4262C' if annualised_pnl_pct < 0 else 'var(--text-success)' }}; line-height: 1.1;">{{ '−' if annualised_pnl_pct < 0 else '+' }}{{ "%.2f"|format(annualised_pnl_pct|abs) }}%</p>
       <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 6px;">per year</p>
     </div>
   </div>
@@ -96,11 +96,15 @@
     </div>
     <div style="position: relative; height: 12px; background: var(--bg-secondary); border-radius: 999px; overflow: hidden;">
       <div style="position: absolute; left: 0; top: 0; bottom: 0; width: {{ capital_pct }}%; background: #888780; border-radius: 999px;"></div>
-      <div style="position: absolute; left: {{ capital_pct }}%; top: 0; bottom: 0; right: 0; background: #1D9E75; border-radius: 999px;"></div>
+      <div style="position: absolute; left: {{ capital_pct }}%; top: 0; bottom: 0; right: 0; background: {{ '#A4262C' if in_loss else '#1D9E75' }}; border-radius: 999px;"></div>
     </div>
     <div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--text-tertiary);">
       <span><span style="display: inline-block; width: 8px; height: 8px; background: #888780; border-radius: 2px; margin-right: 4px; vertical-align: middle;"></span>Capital ({{ "%.1f"|format(capital_pct) }}%)</span>
+      {% if in_loss %}
+      <span style="color: #A4262C;"><span style="display: inline-block; width: 8px; height: 8px; background: #A4262C; border-radius: 2px; margin-right: 4px; vertical-align: middle;"></span>Loss ({{ "%.1f"|format(loss_pct) }}% of premium)</span>
+      {% else %}
       <span><span style="display: inline-block; width: 8px; height: 8px; background: #1D9E75; border-radius: 2px; margin-right: 4px; vertical-align: middle;"></span>Gains ({{ "%.1f"|format(gains_pct) }}%)</span>
+      {% endif %}
     </div>
 
     <!-- PREMIUM CYCLE PROGRESS -->
@@ -162,20 +166,20 @@
           </td>
           <td style="padding: 10px 6px; color: var(--text-secondary);">{{ h.asset_class_label }}</td>
           <td style="padding: 10px 6px; text-align: right;">{{ "{:,.2f}".format(h.fund_value) }}</td>
-          <td style="padding: 10px 6px; text-align: right; color: var(--text-success); font-weight: 500;">+{{ "{:,.2f}".format(h.pnl_dollar) }}</td>
-          <td style="padding: 10px 6px; text-align: right; color: var(--text-success); font-weight: 500;">+{{ "%.2f"|format(h.pnl_pct) }}%</td>
+          <td style="padding: 10px 6px; text-align: right; color: {{ '#A4262C' if h.pnl_dollar < 0 else 'var(--text-success)' }}; font-weight: 500;">{{ '−' if h.pnl_dollar < 0 else '+' }}{{ "{:,.2f}".format(h.pnl_dollar|abs) }}</td>
+          <td style="padding: 10px 6px; text-align: right; color: {{ '#A4262C' if h.pnl_pct < 0 else 'var(--text-success)' }}; font-weight: 500;">{{ '−' if h.pnl_pct < 0 else '+' }}{{ "%.2f"|format(h.pnl_pct|abs) }}%</td>
         </tr>
         {% endfor %}
         <tr>
           <td style="padding: 10px 6px; font-weight: 500;">Total</td>
           <td></td>
           <td style="padding: 10px 6px; text-align: right; font-weight: 500;">{{ "{:,.2f}".format(account_value) }}</td>
-          <td style="padding: 10px 6px; text-align: right; color: var(--text-success); font-weight: 500;">+{{ "{:,.2f}".format(fund_pnl_total) }}</td>
-          <td style="padding: 10px 6px; text-align: right; color: var(--text-success); font-weight: 500;">—</td>
+          <td style="padding: 10px 6px; text-align: right; color: {{ '#A4262C' if fund_pnl_total < 0 else 'var(--text-success)' }}; font-weight: 500;">{{ '−' if fund_pnl_total < 0 else '+' }}{{ "{:,.2f}".format(fund_pnl_total|abs) }}</td>
+          <td style="padding: 10px 6px; text-align: right; color: {{ '#A4262C' if fund_pnl_total < 0 else 'var(--text-success)' }}; font-weight: 500;">—</td>
         </tr>
       </tbody>
     </table>
-    <p style="font-size: 10px; color: var(--text-tertiary); margin-top: 6px;">Fund-level P&L sums to S${{ "{:,.2f}".format(fund_pnl_total) }}. Policy-level P&L of S${{ "{:,.2f}".format(total_pnl_dollar) }} also reflects reinvested dividends and unit-price movement at the policy layer.</p>
+    <p style="font-size: 10px; color: var(--text-tertiary); margin-top: 6px;">Fund-level P&L sums to {{ '−S$' if fund_pnl_total < 0 else 'S$' }}{{ "{:,.2f}".format(fund_pnl_total|abs) }}. Policy-level P&L of {{ '−S$' if total_pnl_dollar < 0 else 'S$' }}{{ "{:,.2f}".format(total_pnl_dollar|abs) }} also reflects reinvested dividends and unit-price movement at the policy layer.</p>
   </div>
 
   <!-- STRATEGY FOOTER -->

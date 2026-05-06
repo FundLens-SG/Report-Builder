@@ -51,7 +51,11 @@ const STATUS_LABELS = {
   failed: 'Failed',
 };
 
-let queue = [];           // [{ id, file, badgeEl, raw?, error? }]
+// Each queue entry corresponds to ONE uploaded PDF. A single PDF may contain
+// multiple policies (Manulife customer reports with two ILPs, etc.) — in that
+// case `raws` holds an array of policy records and we render one PNG per
+// policy. The file row stays "Done" once all of its policies have rendered.
+let queue = [];           // [{ id, file, badgeEl, raws?, error? }]
 let renderToken = 0;       // increments per re-render to discard stale awaits
 let lastZipUrl = null;     // released between batch renders
 
@@ -95,9 +99,13 @@ function scheduleRerender() {
   annualRateEl.readOnly = !excludeAnnualEl.checked;
   // Refresh the bonus-dollar labels immediately so they track the rate input
   // as the user types — only the (debounced) snapshot re-render is deferred.
-  const firstOk = queue.find(q => q.raw);
-  if (firstOk) {
-    updateBonusAmounts(derive(firstOk.raw, {}).annualPremium);
+  const firstParsed = queue.find(q => q.raws && q.raws.length);
+  if (firstParsed) {
+    const recognised = firstParsed.raws.find(r =>
+      r.product && r.variation && PRODUCTS[r.product]?.variations?.[r.variation]
+    );
+    const target = recognised || firstParsed.raws[0];
+    updateBonusAmounts(derive(target, {}).annualPremium);
   }
   clearTimeout(rerenderTimer);
   rerenderTimer = setTimeout(() => updateAllRendered().catch(console.error), 90);
@@ -140,14 +148,15 @@ function setStatus(item, status) {
 }
 
 async function processNewFiles() {
-  const pending = queue.filter(q => !q.raw && !q.error);
+  const pending = queue.filter(q => !q.raws && !q.error);
   if (!pending.length) return;
 
   for (const item of pending) {
     setStatus(item, 'parsing');
     try {
       const buffer = await item.file.arrayBuffer();
-      item.raw = await parsePdf(buffer);
+      item.raws = await parsePdf(buffer);
+      if (!item.raws.length) throw new Error('No policies detected');
     } catch (err) {
       console.error(`Failed to parse ${item.file.name}:`, err);
       item.error = err?.message ?? String(err);
@@ -159,20 +168,41 @@ async function processNewFiles() {
   await updateAllRendered();
 }
 
+// Each policy across all parsed PDFs becomes its own render target. Used by
+// updateAllRendered + populateBonusPanelFromFirst.
+function allParsedPolicies() {
+  const out = [];
+  for (const item of queue) {
+    if (!item.raws) continue;
+    for (const raw of item.raws) {
+      out.push({ item, raw });
+    }
+  }
+  return out;
+}
+
 
 // ---------- Bonus panel ------------------------------------------------------
 
 function populateBonusPanelFromFirst() {
-  const firstOk = queue.find(q => q.raw);
-  if (!firstOk) return;
+  // Use the first policy that has a recognised product, falling back to the
+  // first policy of the first parsed PDF. Multi-policy PDFs typically include
+  // a Manulink/SRS variant alongside an InvestReady variant — we prefer the
+  // recognised one so the bonus panel actually has detected rates to show.
+  const policies = allParsedPolicies();
+  if (!policies.length) return;
+  const recognisedFirst = policies.find(({ raw }) =>
+    raw.product && raw.variation && PRODUCTS[raw.product]?.variations?.[raw.variation]
+  );
+  const target = (recognisedFirst || policies[0]).raw;
 
-  const preview = derive(firstOk.raw, {});
-  const recognised = !!(firstOk.raw.product && firstOk.raw.variation
-    && PRODUCTS[firstOk.raw.product]?.variations?.[firstOk.raw.variation]);
+  const preview = derive(target, {});
+  const recognised = !!(target.product && target.variation
+    && PRODUCTS[target.product]?.variations?.[target.variation]);
 
   if (recognised) {
-    detectedProductEl.textContent = PRODUCTS[firstOk.raw.product].label;
-    detectedVariationLineEl.textContent = `${firstOk.raw.variation}  ·  S$${fmt0(preview.annualPremium)} annual`;
+    detectedProductEl.textContent = PRODUCTS[target.product].label;
+    detectedVariationLineEl.textContent = `${target.variation}  ·  S$${fmt0(preview.annualPremium)} annual`;
     detectedRatesEl.textContent = `${fmtPct1(preview.welcomeBonusRate * 100)}% · ${fmtPct1(preview.annualPremiumBonusRate * 100)}%`;
   } else {
     detectedProductEl.textContent = 'Not auto-detected';
@@ -221,61 +251,69 @@ function currentBonusOptions() {
 
 async function updateAllRendered() {
   const myToken = ++renderToken;
-  const okItems = queue.filter(q => q.raw);
-  if (!okItems.length) {
+  const policies = allParsedPolicies();
+  if (!policies.length) {
     resultSection.hidden = true;
     return;
   }
 
+  // Render every policy across every uploaded PDF. A file row goes to "Done"
+  // only after its last policy has rendered (or any policy fails).
+  const renderedByItem = new Map();  // queue item -> { ok: int, fail: int }
   const successes = [];
-  for (const item of okItems) {
+  for (const { item, raw } of policies) {
     setStatus(item, 'rendering');
     try {
       const opts = currentBonusOptions();
-      const data = derive(item.raw, opts);
+      const data = derive(raw, opts);
       const blob = await renderToPng(data);
       if (myToken !== renderToken) return;  // newer render started
-      successes.push({ item, blob, data });
-      setStatus(item, 'done');
-      // Cross-tool activity log (ckgtools landing): one event per
-      // successfully converted report. No-op when not signed into hub.
-      try { window.ckgTrackReportConverted && window.ckgTrackReportConverted(item.raw, data); } catch (_e) {}
+      successes.push({ item, raw, blob, data });
+      const tally = renderedByItem.get(item) || { ok: 0, fail: 0 };
+      tally.ok += 1; renderedByItem.set(item, tally);
+      try { window.ckgTrackReportConverted && window.ckgTrackReportConverted(raw, data); } catch (_e) {}
     } catch (err) {
-      // If a newer render started, html2canvas can fail mid-flight when its
-      // cloned iframe loses the now-removed node. That's not a real parse
-      // failure — silently abort this stale pass and let the newer one run.
+      // html2canvas can fail mid-flight when a newer render started — that
+      // throws because the cloned iframe loses the removed node. Not a real
+      // parse failure: silently abort the stale pass.
       if (myToken !== renderToken) return;
-      console.error(`Failed to render ${item.file.name}:`, err);
-      item.error = err?.message ?? String(err);
-      setStatus(item, 'failed');
+      console.error(`Failed to render ${item.file.name} (policy ${raw.policyNumber}):`, err);
+      const tally = renderedByItem.get(item) || { ok: 0, fail: 0 };
+      tally.fail += 1; renderedByItem.set(item, tally);
+      if (!item.error) item.error = err?.message ?? String(err);
     }
   }
   if (myToken !== renderToken) return;
+
+  // Update each file row's badge to reflect aggregate success across its policies.
+  for (const [item, tally] of renderedByItem) {
+    setStatus(item, tally.fail > 0 && tally.ok === 0 ? 'failed' : 'done');
+  }
   if (!successes.length) {
     resultSection.hidden = true;
     return;
   }
 
-  // Preview is always the FIRST successful file.
+  // Preview is the FIRST successful policy (first PDF, first policy).
   const first = successes[0];
-  const filename = buildFilename(first.item.raw.customerName, first.item.raw.policyNumber, first.item.raw.reportDate);
-  const url = URL.createObjectURL(first.blob);
-  previewImg.src = url;
-  previewFilenameEl.textContent = filename;
+  const firstFilename = buildFilename(first.raw.customerName, first.raw.policyNumber, first.raw.reportDate);
+  const firstUrl = URL.createObjectURL(first.blob);
+  previewImg.src = firstUrl;
+  previewFilenameEl.textContent = firstFilename;
 
   // Phase 9F — remember the latest preview for the Save-to-Drive button.
   lastPreviewBlob = first.blob;
   lastPreviewMeta = {
-    clientName:  first.item.raw.customerName || '',
+    clientName:  first.raw.customerName || '',
     reportTitle: first.data?.product || '',
-    reportId:    first.item.raw.policyNumber || '',
-    date:        first.item.raw.reportDate || '',
+    reportId:    first.raw.policyNumber || '',
+    date:        first.raw.reportDate || '',
   };
   if (driveSaveBtn) driveSaveBtn.disabled = false;
 
   if (successes.length === 1) {
-    downloadBtn.href = url;
-    downloadBtn.download = filename;
+    downloadBtn.href = firstUrl;
+    downloadBtn.download = firstFilename;
     downloadLabel.textContent = 'Download PNG';
     resultCountEl.textContent = 'PNG ready · 1 of 1';
   } else {
@@ -283,7 +321,7 @@ async function updateAllRendered() {
     // eslint-disable-next-line no-undef
     const zip = new JSZip();
     for (const s of successes) {
-      const fname = buildFilename(s.item.raw.customerName, s.item.raw.policyNumber, s.item.raw.reportDate);
+      const fname = buildFilename(s.raw.customerName, s.raw.policyNumber, s.raw.reportDate);
       zip.file(fname, s.blob);
     }
     const zipBlob = await zip.generateAsync({ type: 'blob' });
@@ -292,10 +330,10 @@ async function updateAllRendered() {
     downloadBtn.href = lastZipUrl;
     downloadBtn.download = zipName;
     downloadLabel.textContent = `Download ZIP (${successes.length})`;
-    resultCountEl.textContent = `PNG ready · ${successes.length} of ${queue.length}`;
+    resultCountEl.textContent = `PNG ready · ${successes.length} of ${policies.length}`;
   }
 
-  buildDeltaCard(first.item.raw, first.data);
+  buildDeltaCard(first.raw, first.data);
   resultSection.hidden = false;
 }
 
@@ -317,9 +355,9 @@ function buildDeltaCard(raw, adjustedData) {
       </div>
       <h4>Customer view of <em>${esc(customer)}'s</em> ${esc(productLabel)} policy, as of ${esc(raw.reportDate)}.</h4>
       <div class="delta-rows">
-        ${unadjRow('Net gain', `+S$${fmt2(raw.totalPnlDollar)}`)}
-        ${unadjRow('Total return', `+${fmtPct2(raw.totalPnlPct)}%`)}
-        ${unadjRow('Annualised IRR', `+${fmtPct2(raw.annualisedPnlPct)}%`)}
+        ${unadjRow('Net gain', signedMoney(raw.totalPnlDollar))}
+        ${unadjRow('Total return', signedPct(raw.totalPnlPct))}
+        ${unadjRow('Annualised IRR', signedPct(raw.annualisedPnlPct))}
       </div>
       <p class="delta-foot">Toggle <b>Exclude Welcome Bonus</b> or <b>Exclude Annual Premium Bonus</b> in the panel above to see the figures net of marketing incentives — the snapshot updates live.</p>
     `;
@@ -337,9 +375,9 @@ function buildDeltaCard(raw, adjustedData) {
     </div>
     <h4>Excluding ${esc(excludedDescriptor.short)} drops <em>annualised IRR</em> from ${fmtPct2(baseline.annualisedPnlPct)}% to ${fmtPct2(adjustedData.annualisedPnlPct)}%.</h4>
     <div class="delta-rows">
-      ${deltaRow('Annualised IRR', `+${fmtPct2(baseline.annualisedPnlPct)}%`, `+${fmtPct2(adjustedData.annualisedPnlPct)}%`, true)}
-      ${deltaRow('Total return', `+${fmtPct2(baseline.totalPnlPct)}%`, `+${fmtPct2(adjustedData.totalPnlPct)}%`)}
-      ${deltaRow('Net gain', `+S$${fmt2(baseline.totalPnlDollar)}`, `+S$${fmt2(adjustedData.totalPnlDollar)}`)}
+      ${deltaRow('Annualised IRR', signedPct(baseline.annualisedPnlPct), signedPct(adjustedData.annualisedPnlPct), true)}
+      ${deltaRow('Total return', signedPct(baseline.totalPnlPct), signedPct(adjustedData.totalPnlPct))}
+      ${deltaRow('Net gain', signedMoney(baseline.totalPnlDollar), signedMoney(adjustedData.totalPnlDollar))}
     </div>
     <p class="delta-foot">${esc(excludedDescriptor.foot)} The snapshot shows an amber <b>ADJUSTED</b> pill on each metric card so it's clear at a glance.</p>
   `;
@@ -402,6 +440,9 @@ function fmt2(n) { return Number(n || 0).toLocaleString('en-US', { minimumFracti
 function fmt0(n) { return Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 }); }
 function fmtPct1(n) { return Number(n || 0).toFixed(1); }
 function fmtPct2(n) { return Number(n || 0).toFixed(2); }
+// Use U+2212 ('−') for losses — better visual rhythm than the ASCII hyphen.
+function signedMoney(n) { return n < 0 ? `−S$${fmt2(Math.abs(n))}` : `+S$${fmt2(n)}`; }
+function signedPct(n)   { return n < 0 ? `−${fmtPct2(Math.abs(n))}%` : `+${fmtPct2(n)}%`; }
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;

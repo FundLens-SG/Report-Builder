@@ -102,12 +102,17 @@ function header(d) {
 }
 
 function metricCards(d) {
-  const card = (label, big, sub, badge = '') => `
+  // Use red for losses, green for gains. The Manulife report itself shows
+  // negatives plainly (e.g. "Total P&L ($) SGD -629.11") so we match that.
+  const card = (label, big, sub, badge = '', negative = false) => {
+    const color = negative ? '#A4262C' : '#0F6E56';
+    return `
     <div style="background: #f5f4ee; border-radius: 8px; padding: 14px;">
       <p style="font-size: 11px; color: #5f5e5a; margin: 0 0 6px 0;">${label}${badge}</p>
-      <p style="font-size: 22px; font-weight: 500; color: #0F6E56; margin: 0; line-height: 1.1;">${big}</p>
+      <p style="font-size: 22px; font-weight: 500; color: ${color}; margin: 0; line-height: 1.1;">${big}</p>
       <p style="font-size: 11px; color: #888780; margin: 6px 0 0 0;">${sub}</p>
     </div>`;
+  };
 
   // When bonus exclusions are active, mark the affected cards so the reader
   // knows the figures aren't Manulife's stated numbers.
@@ -117,10 +122,19 @@ function metricCards(d) {
 
   return `
   <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 1.25rem;">
-    ${card('Net gain', `+S$${fmt2(d.totalPnlDollar)}`, `from S$${fmt0(d.policyInvestmentCost)} invested`, badge)}
-    ${card('Total return', `+${fmtPct2(d.totalPnlPct)}%`, 'absolute, since inception', badge)}
-    ${card('Annualised IRR', `+${fmtPct2(d.annualisedPnlPct)}%`, 'per year', badge)}
+    ${card('Net gain', signedMoney(d.totalPnlDollar), `from S$${fmt0(d.policyInvestmentCost)} invested`, badge, d.totalPnlDollar < 0)}
+    ${card('Total return', signedPct(d.totalPnlPct), 'absolute, since inception', badge, d.totalPnlPct < 0)}
+    ${card('Annualised IRR', signedPct(d.annualisedPnlPct), 'per year', badge, d.annualisedPnlPct < 0)}
   </div>`;
+}
+
+function signedMoney(n) {
+  if (n < 0) return `−S$${fmt2(Math.abs(n))}`;  // U+2212 minus, looks better than hyphen
+  return `+S$${fmt2(n)}`;
+}
+function signedPct(n) {
+  if (n < 0) return `−${fmtPct2(Math.abs(n))}%`;
+  return `+${fmtPct2(n)}%`;
 }
 
 function investmentJourney(d) {
@@ -164,11 +178,14 @@ function investmentJourney(d) {
     </div>
     <div style="position: relative; height: 12px; background: #f5f4ee; border-radius: 999px; overflow: hidden;">
       <div style="position: absolute; left: 0; top: 0; bottom: 0; width: ${d.capitalPct}%; background: #888780; border-radius: 999px;"></div>
-      <div style="position: absolute; left: ${d.capitalPct}%; top: 0; bottom: 0; right: 0; background: #1D9E75; border-radius: 999px;"></div>
+      <div style="position: absolute; left: ${d.capitalPct}%; top: 0; bottom: 0; right: 0; background: ${d.inLoss ? '#A4262C' : '#1D9E75'}; border-radius: 999px;"></div>
     </div>
     <div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: #888780;">
       <span><span style="display: inline-block; width: 8px; height: 8px; background: #888780; border-radius: 2px; margin-right: 4px; vertical-align: middle;"></span>Capital (${fmtPct1(d.capitalPct)}%)</span>
-      <span><span style="display: inline-block; width: 8px; height: 8px; background: #1D9E75; border-radius: 2px; margin-right: 4px; vertical-align: middle;"></span>Gains (${fmtPct1(d.gainsPct)}%)</span>
+      ${d.inLoss
+        ? `<span style="color: #A4262C;"><span style="display: inline-block; width: 8px; height: 8px; background: #A4262C; border-radius: 2px; margin-right: 4px; vertical-align: middle;"></span>Loss (${fmtPct1(d.lossPct)}% of premium)</span>`
+        : `<span><span style="display: inline-block; width: 8px; height: 8px; background: #1D9E75; border-radius: 2px; margin-right: 4px; vertical-align: middle;"></span>Gains (${fmtPct1(d.gainsPct)}%)</span>`
+      }
     </div>
     <div style="margin-top: 14px; padding-top: 10px; border-top: 0.5px solid rgba(0,0,0,0.08); display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 10.5px; color: #888780;">
       <span style="white-space: nowrap;">Premium term · Flexi ${d.flexiTerm}</span>
@@ -200,6 +217,10 @@ function allocationSection(d) {
 }
 
 function holdingsTable(d) {
+  const cellColor = (n) => (n < 0 ? '#A4262C' : '#0F6E56');
+  const signMoney = (n) => (n < 0 ? `−${fmt2(Math.abs(n))}` : `+${fmt2(n)}`);
+  const signPct = (n) => (n < 0 ? `−${fmtPct2(Math.abs(n))}%` : `+${fmtPct2(n)}%`);
+
   const rows = d.holdingsEnriched.map(h => `
     <tr style="border-bottom: 0.5px solid rgba(0,0,0,0.08);">
       <td style="padding: 10px 6px;">
@@ -210,8 +231,8 @@ function holdingsTable(d) {
       </td>
       <td style="padding: 10px 6px; color: #5f5e5a;">${esc(h.assetClassLabel)}</td>
       <td style="padding: 10px 6px; text-align: right;">${fmt2(h.fundValue)}</td>
-      <td style="padding: 10px 6px; text-align: right; color: #0F6E56; font-weight: 500;">+${fmt2(h.pnlDollar)}</td>
-      <td style="padding: 10px 6px; text-align: right; color: #0F6E56; font-weight: 500;">+${fmtPct2(h.pnlPct)}%</td>
+      <td style="padding: 10px 6px; text-align: right; color: ${cellColor(h.pnlDollar)}; font-weight: 500;">${signMoney(h.pnlDollar)}</td>
+      <td style="padding: 10px 6px; text-align: right; color: ${cellColor(h.pnlPct)}; font-weight: 500;">${signPct(h.pnlPct)}</td>
     </tr>
   `).join('');
 
@@ -234,12 +255,12 @@ function holdingsTable(d) {
           <td style="padding: 10px 6px; font-weight: 500;">Total</td>
           <td></td>
           <td style="padding: 10px 6px; text-align: right; font-weight: 500;">${fmt2(d.accountValue)}</td>
-          <td style="padding: 10px 6px; text-align: right; color: #0F6E56; font-weight: 500;">+${fmt2(d.fundPnlTotal)}</td>
-          <td style="padding: 10px 6px; text-align: right; color: #0F6E56; font-weight: 500;">—</td>
+          <td style="padding: 10px 6px; text-align: right; color: ${cellColor(d.fundPnlTotal)}; font-weight: 500;">${signMoney(d.fundPnlTotal)}</td>
+          <td style="padding: 10px 6px; text-align: right; color: ${cellColor(d.fundPnlTotal)}; font-weight: 500;">—</td>
         </tr>
       </tbody>
     </table>
-    <p style="font-size: 10px; color: #888780; margin: 6px 0 0 0;">Fund-level P&amp;L sums to S$${fmt2(d.fundPnlTotal)}. Policy-level P&amp;L of S$${fmt2(d.totalPnlDollar)} also reflects reinvested dividends and unit-price movement at the policy layer.</p>
+    <p style="font-size: 10px; color: #888780; margin: 6px 0 0 0;">Fund-level P&amp;L sums to ${signMoney(d.fundPnlTotal)}. Policy-level P&amp;L of ${signMoney(d.totalPnlDollar)} also reflects reinvested dividends and unit-price movement at the policy layer.</p>
   </div>`;
 }
 

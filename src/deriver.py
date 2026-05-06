@@ -45,10 +45,16 @@ def derive(raw: RawReport) -> dict[str, Any]:
     )
     premiums_remaining = max(0, flexi_term - premiums_paid_count)
 
-    capital_pct = (
+    # capital_pct can exceed 100 when account < cost (a loss).
+    # Clamp the visual representation to [0, 100] so the progress bar fills
+    # sensibly, and surface a separate `loss_pct` for the legend label.
+    raw_capital_pct = (
         (raw.policy_investment_cost / raw.account_value * 100) if raw.account_value else 0.0
     )
+    in_loss = raw_capital_pct > 100
+    capital_pct = min(100.0, raw_capital_pct)
     gains_pct = max(0.0, 100 - capital_pct)
+    loss_pct = max(0.0, raw_capital_pct - 100) if in_loss else 0.0
 
     holdings_enriched = _enrich_holdings(raw.holdings, raw.account_value)
     fund_pnl_total = sum(h["pnl_dollar"] for h in holdings_enriched)
@@ -87,6 +93,8 @@ def derive(raw: RawReport) -> dict[str, Any]:
         "premiums_remaining": premiums_remaining,
         "capital_pct": round(capital_pct, 1),
         "gains_pct": round(gains_pct, 1),
+        "in_loss": in_loss,
+        "loss_pct": round(loss_pct, 1),
         "holdings_enriched": holdings_enriched,
         "fund_pnl_total": fund_pnl_total,
         "equity_pct": round(equity_pct, 1),

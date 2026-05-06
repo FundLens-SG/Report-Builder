@@ -16,6 +16,9 @@ input/*.pdf
 !input/.gitkeep
 !output/.gitkeep
 
+# Local-only fixtures (real customer PDFs, never commit)
+tests/fixtures/_local/
+
 # IDE / OS
 .vscode/
 .idea/
