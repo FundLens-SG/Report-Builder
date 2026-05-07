@@ -504,77 +504,86 @@ body::after {
   color: var(--ink-3);
 }
 
-/* One card per detected (product, variation) group. Cards stack inside
-   the bonus panel; a 1-policy upload renders one card, a mixed batch
-   renders one per group. Each card owns its own checkboxes + rate inputs. */
-.bonus-groups {
-  padding: 4px 0;
+/* Detected-products summary table. Read-only — shows what variants were
+   found in the upload and the auto-applied rates. Sits above the toggle
+   rows. The toggles below are global; the per-policy rate is sourced from
+   the variant each policy belongs to. */
+.detected-summary {
+  padding: 14px 24px;
+  background: var(--bg-inset);
+  border-bottom: 1px solid var(--hairline);
 }
-.bonus-group {
-  padding: 0;
-}
-.bonus-group + .bonus-group {
-  border-top: 1px solid var(--hairline);
-}
-
-.bonus-group-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px 24px 10px;
-}
-.bonus-group-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.bonus-group-title h4 {
-  font-size: 15px;
-  font-weight: 500;
-  letter-spacing: -0.005em;
-  color: var(--ink);
-  margin: 0;
-}
-.bonus-group-meta {
-  margin: 4px 0 0;
-  font-size: 12.5px;
-  /* Bumped from --ink-4 / --ink-3 (used to feel washed out on dark cards) */
-  color: var(--ink-2);
-  line-height: 1.5;
-}
-.bonus-group-meta strong {
-  color: var(--ink);
-  font-weight: 500;
-}
-
-/* DETECTED / MANUAL pills next to the group title.
-   - DETECTED: warm accent (auto-filled rates from rate tables)
-   - MANUAL:   muted grey (no published rates, user types their own) */
-.bonus-pill {
+.detected-summary-title {
   font-family: var(--mono);
-  font-size: 9.5px;
-  font-weight: 500;
+  font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  padding: 3px 9px;
+  color: var(--ink-3);
+  margin: 0 0 10px;
+}
+.detected-summary-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.detected-summary-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.detected-summary-row .count {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  background: oklch(1 0 0 / 0.06);
+  border: 1px solid var(--hairline-2);
+  border-radius: 999px;
+  padding: 2px 6px;
+  text-align: center;
+  color: var(--ink-2);
+  min-width: 32px;
+}
+.detected-summary-row .name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ink);
+  font-weight: 500;
+}
+.detected-summary-row .pill {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 3px 8px;
   border-radius: 999px;
   white-space: nowrap;
 }
-.bonus-pill.detected {
+.detected-summary-row .pill.detected {
   background: var(--accent-dim);
   color: var(--accent);
 }
-.bonus-pill.manual {
+.detected-summary-row .pill.manual {
   background: oklch(1 0 0 / 0.06);
   color: var(--ink-2);
   border: 1px solid var(--hairline-2);
 }
-
-.bonus-rows {
-  padding: 4px 0 8px;
+.detected-summary-row .rates {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  white-space: nowrap;
+  min-width: 86px;
+  text-align: right;
+}
+.detected-summary-row .rates .none {
+  color: var(--ink-4);
+  font-style: italic;
 }
 .bonus-row {
   display: grid;
@@ -722,6 +731,48 @@ body::after {
   display: flex; flex-direction: column;
   gap: 16px;
 }
+
+/* Prev/next bar above the preview frame, only shown for multi-snapshot
+   batches. The chevron buttons feel intentional but stay quiet — they're
+   the same accent as the Choose-PDFs CTA, not a heavy color. */
+.preview-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.preview-nav-bar .nav-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-inset);
+  border: 1px solid var(--hairline-2);
+  color: var(--ink-2);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 160ms var(--easeOut), color 160ms var(--easeOut), border-color 160ms var(--easeOut);
+}
+.preview-nav-bar .nav-btn svg { width: 16px; height: 16px; }
+.preview-nav-bar .nav-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+.preview-nav-bar .nav-btn:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+}
+.preview-nav-bar .nav-counter {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
 .preview-frame {
   position: relative;
   flex: 1;
@@ -865,6 +916,85 @@ body::after {
   font-weight: 360;
   font-size: 12.5px;
   color: var(--ink-3);
+}
+
+/* ── Snapshot carousel ──────────────────────────────────────────── */
+.snapshot-carousel {
+  margin-top: 18px;
+}
+.carousel-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+  padding: 0 4px;
+}
+.carousel-title {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.carousel-hint {
+  font-size: 11px;
+  color: var(--ink-4);
+}
+.carousel-strip {
+  display: flex;
+  gap: 10px;
+  padding: 8px 4px 12px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline-2) transparent;
+}
+.carousel-strip::-webkit-scrollbar { height: 8px; }
+.carousel-strip::-webkit-scrollbar-track { background: transparent; }
+.carousel-strip::-webkit-scrollbar-thumb {
+  background: var(--hairline-2);
+  border-radius: 4px;
+}
+.carousel-thumb {
+  flex: 0 0 auto;
+  width: 92px;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 6px;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  padding: 4px;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition: border-color 160ms var(--easeOut), background 160ms var(--easeOut);
+}
+.carousel-thumb:hover {
+  background: oklch(1 0 0 / 0.03);
+}
+.carousel-thumb.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.carousel-thumb img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 4px;
+  background: var(--bg-deep);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.42);
+}
+.carousel-thumb .thumb-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.carousel-thumb.active .thumb-label {
+  color: var(--ink);
 }
 
 /* ── State containers (hidden/shown via JS) ────────────────────── */

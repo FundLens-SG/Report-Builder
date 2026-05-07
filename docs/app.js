@@ -17,7 +17,18 @@ const chooseBtn = document.getElementById('choose-btn');
 const fileList = document.getElementById('file-list');
 
 const adjustmentsBlock = document.getElementById('adjustments-block');
-const bonusGroupsEl = document.getElementById('bonus-groups');
+const detectedSummaryEl = document.getElementById('detected-summary');
+const excludeWelcomeEl = document.getElementById('exclude-welcome');
+const excludeAnnualEl = document.getElementById('exclude-annual');
+const welcomeTotalEl = document.getElementById('welcome-total-amount');
+const annualTotalEl = document.getElementById('annual-total-amount');
+
+const previewNavBar = document.getElementById('preview-nav-bar');
+const prevPreviewBtn = document.getElementById('prev-preview');
+const nextPreviewBtn = document.getElementById('next-preview');
+const previewCounterEl = document.getElementById('preview-counter');
+const carouselEl = document.getElementById('snapshot-carousel');
+const carouselStripEl = document.getElementById('carousel-strip');
 
 const resultSection = document.getElementById('result-section');
 const resultCountEl = document.getElementById('result-count');
@@ -250,219 +261,143 @@ function allParsedPolicies() {
 }
 
 
-// ---------- Bonus panel: per-product groups ---------------------------------
+// ---------- Bonus panel: global toggles, per-policy auto rates --------------
 //
-// A "group" is one (product, variation) cluster. Every policy in a group
-// shares the same checkboxes and rate inputs — flipping Exclude Welcome on
-// the InvestReady (III) · 13Y Flexi 10 card affects only the InvestReady (III)
-// 13Y Flexi 10 policies. A 1-policy upload gets one card; a mixed batch gets
-// one per detected product. State persists across re-renders (groupState
-// Map) so user overrides survive subsequent uploads.
-
-const groupState = new Map();   // groupKey -> { excludeWelcome, excludeAnnual, welcomeRate, annualRate, touched }
-
-function groupKeyFor(raw) {
-  // Recognised products group by product+variation. Anything else groups by
-  // its own policyName so distinct unrecognised products don't get conflated.
-  if (raw.product && raw.variation && PRODUCTS[raw.product]?.variations?.[raw.variation]) {
-    return `auto::${raw.product}::${raw.variation}`;
-  }
-  return `manual::${raw.policyName || 'Unknown'}`;
-}
+// Two GLOBAL checkboxes apply to every uploaded policy. Each policy still
+// uses ITS OWN auto-detected rates from the bonus.js tables (welcome rate
+// is tiered by annual premium, annual-premium rate is fixed per variation),
+// so a 20-policy / 3-product batch toggles correctly with one click.
+//
+// Products without published rates contribute 0 % — toggling has no effect
+// on those policies. The detected-summary above the toggles spells out
+// exactly what the rates are per variant so the user can see what each
+// click is going to do.
 
 function annualPremiumFor(raw) {
-  // Mirrors deriver.js — used to compute the avg annual premium shown on a
-  // group card and to look up tiered welcome rates without round-tripping
-  // through derive().
   return derive(raw, {}).annualPremium;
 }
 
-// Build the groups data structure from current parsed policies. Each group
-// holds the policies that landed in it plus the SAME state object referenced
-// from groupState (mutating it in place updates the live state).
-function computeBonusGroups() {
+// Group policies by (product, variation) for the read-only summary panel.
+// Recognised products → "Manulife InvestReady (III) · 13 Years Flexi 10" with
+// rates. Unrecognised → grouped by policyName so distinct ones (Manulink vs
+// SRS) don't collapse together.
+function detectedGroups() {
   const groups = new Map();
   for (const item of queue) {
     if (!item.raws) continue;
     for (const raw of item.raws) {
-      const key = groupKeyFor(raw);
+      const recognised = !!(raw.product && raw.variation
+        && PRODUCTS[raw.product]?.variations?.[raw.variation]);
+      const key = recognised
+        ? `auto::${raw.product}::${raw.variation}`
+        : `manual::${raw.policyName || 'Unknown'}`;
       if (!groups.has(key)) {
-        const recognised = !!(raw.product && raw.variation
-          && PRODUCTS[raw.product]?.variations?.[raw.variation]);
         groups.set(key, {
-          key,
           recognised,
           product: raw.product,
           variation: raw.variation,
           policyName: raw.policyName,
           policies: [],
-          totalCost: 0,
-          totalPaidYears: 0,
         });
       }
-      const grp = groups.get(key);
-      grp.policies.push(raw);
-      const ap = annualPremiumFor(raw);
-      grp.totalCost += raw.policyInvestmentCost || 0;
-      grp.totalPaidYears += raw.policyInvestmentCost && ap ? raw.policyInvestmentCost / ap : 0;
+      groups.get(key).policies.push(raw);
     }
   }
   return groups;
 }
 
-function ensureGroupState(grp, avgAnnual) {
-  let state = groupState.get(grp.key);
-  if (!state) {
-    // First time we see this group: prefill from the rate tables. For
-    // unrecognised products both rates default to 0 — the user can still
-    // type a campaign rate without ticking the box first, then tick.
-    const auto = grp.recognised
-      ? lookupBonusRates(grp.product, grp.variation, avgAnnual)
-      : { welcomeRate: 0, annualPremiumRate: 0, recognised: false };
-    state = {
-      excludeWelcome: false,
-      excludeAnnual: false,
-      welcomeRate: auto.welcomeRate || 0,
-      annualPremiumRate: auto.annualPremiumRate || 0,
-      touched: false,  // user has manually edited at least one rate
-    };
-    groupState.set(grp.key, state);
-  }
-  return state;
-}
-
-function renderBonusGroups() {
-  const groups = computeBonusGroups();
+function renderDetectedSummary() {
+  const groups = detectedGroups();
   if (!groups.size) {
     adjustmentsBlock.hidden = true;
     return;
   }
   adjustmentsBlock.hidden = false;
-  bonusGroupsEl.innerHTML = '';
 
-  for (const grp of groups.values()) {
-    const avgAnnual = grp.policies.length
-      ? grp.policies.reduce((s, raw) => s + annualPremiumFor(raw), 0) / grp.policies.length
-      : 0;
-    const state = ensureGroupState(grp, avgAnnual);
-
-    const card = document.createElement('div');
-    card.className = 'bonus-group';
-    card.dataset.key = grp.key;
-
+  const totalPolicies = [...groups.values()].reduce((s, g) => s + g.policies.length, 0);
+  const rows = [...groups.values()].map(grp => {
     const title = grp.recognised
       ? `${PRODUCTS[grp.product].label} · ${esc(grp.variation)}`
       : esc(grp.policyName || 'Unrecognised product');
     const pill = grp.recognised
-      ? '<span class="bonus-pill detected">DETECTED</span>'
-      : '<span class="bonus-pill manual">MANUAL</span>';
-
-    const policiesWord = `${grp.policies.length} polic${grp.policies.length === 1 ? 'y' : 'ies'}`;
-    const meta = grp.recognised
-      ? `${policiesWord} · annual premium <strong>S$${fmt0(avgAnnual)}</strong>`
-      : `${policiesWord} · No published bonus rates — defaults to <strong>0%</strong>, edit manually if a campaign applies`;
-
-    card.innerHTML = `
-      <div class="bonus-group-head">
-        <div>
-          <div class="bonus-group-title"><h4>${title}</h4>${pill}</div>
-          <p class="bonus-group-meta">${meta}</p>
-        </div>
-      </div>
-      <div class="bonus-rows">
-        ${bonusRowMarkup({
-          field: 'welcome',
-          title: 'Exclude Welcome Bonus from IRR',
-          desc: 'First-year-only bonus, paid by Manulife at policy inception.',
-          checked: state.excludeWelcome,
-          rate: state.welcomeRate,
-          amount: avgAnnual * state.welcomeRate,
-        })}
-        ${bonusRowMarkup({
-          field: 'annual',
-          title: 'Exclude Annual Premium Bonus from IRR',
-          desc: 'Recurring bonus paid each premium year. Override the rate for custom campaigns.',
-          checked: state.excludeAnnual,
-          rate: state.annualPremiumRate,
-          amount: avgAnnual * state.annualPremiumRate,
-        })}
-      </div>
+      ? '<span class="pill detected">DETECTED</span>'
+      : '<span class="pill manual">MANUAL</span>';
+    // Welcome rate is tiered by annual premium, so policies in the same
+    // (product, variation) group COULD land in different tiers. We use the
+    // first policy's tier as the representative rate for the summary; the
+    // actual render still computes the tier per-policy so each one gets the
+    // correct number applied.
+    const repPolicy = grp.policies[0];
+    const auto = grp.recognised
+      ? lookupBonusRates(grp.product, grp.variation, annualPremiumFor(repPolicy))
+      : { welcomeRate: 0, annualPremiumRate: 0, recognised: false };
+    const rates = grp.recognised
+      ? `${(auto.welcomeRate * 100).toFixed(1)}% · ${(auto.annualPremiumRate * 100).toFixed(1)}%`
+      : '<span class="none">no published bonus</span>';
+    return `
+      <li class="detected-summary-row">
+        <span class="count">${grp.policies.length}</span>
+        <span class="name">${title}</span>
+        ${pill}
+        <span class="rates">${rates}</span>
+      </li>
     `;
-    bonusGroupsEl.appendChild(card);
-  }
-}
+  }).join('');
 
-function bonusRowMarkup({ field, title, desc, checked, rate, amount }) {
-  return `
-    <div class="bonus-row" data-field="${field}">
-      <label class="bonus-check">
-        <input type="checkbox" data-bonus-toggle="${field}" ${checked ? 'checked' : ''}>
-        <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span>
-      </label>
-      <div class="meta">
-        <span class="ttl">${title}</span>
-        <span class="desc">${desc}</span>
-      </div>
-      <div class="rate-input">
-        <input type="number" data-bonus-rate="${field}" value="${(rate * 100).toFixed(1)}" step="0.1" min="0" max="100" inputmode="decimal">
-        <span class="suffix">%</span>
-      </div>
-      <div class="bonus-amount" data-bonus-amount="${field}">S$${fmt0(amount)}</div>
-    </div>
+  detectedSummaryEl.innerHTML = `
+    <p class="detected-summary-title">Detected products · ${totalPolicies} polic${totalPolicies === 1 ? 'y' : 'ies'} total</p>
+    <ul class="detected-summary-list">${rows}</ul>
   `;
 }
 
-// Event delegation on the groups container — each card has the same control
-// shape, so we route by data-* attributes instead of attaching listeners
-// per-card. Survives re-renders without re-binding.
-bonusGroupsEl.addEventListener('change', onBonusControlChange);
-bonusGroupsEl.addEventListener('input', onBonusControlInput);
-
-function onBonusControlChange(e) {
-  const t = e.target;
-  if (!t.matches('input[data-bonus-toggle]')) return;
-  const card = t.closest('.bonus-group');
-  const state = groupState.get(card?.dataset.key);
-  if (!state) return;
-  if (t.dataset.bonusToggle === 'welcome') state.excludeWelcome = t.checked;
-  if (t.dataset.bonusToggle === 'annual') state.excludeAnnual = t.checked;
-  scheduleRerender();
-}
-
-function onBonusControlInput(e) {
-  const t = e.target;
-  if (!t.matches('input[data-bonus-rate]')) return;
-  const card = t.closest('.bonus-group');
-  const state = groupState.get(card?.dataset.key);
-  if (!state) return;
-  const rate = (parseFloat(t.value) || 0) / 100;
-  if (t.dataset.bonusRate === 'welcome') state.welcomeRate = rate;
-  if (t.dataset.bonusRate === 'annual') state.annualPremiumRate = rate;
-  state.touched = true;
-  // Refresh the dollar-amount label live as the user types.
-  const amountEl = card.querySelector(`[data-bonus-amount="${t.dataset.bonusRate}"]`);
-  if (amountEl) {
-    const policies = (computeBonusGroups().get(card.dataset.key) || { policies: [] }).policies;
-    const avgAnnual = policies.length
-      ? policies.reduce((s, raw) => s + annualPremiumFor(raw), 0) / policies.length
-      : 0;
-    amountEl.textContent = `S$${fmt0(avgAnnual * rate)}`;
-  }
-  scheduleRerender();
-}
-
-
-// ---------- Render orchestration ---------------------------------------------
-
-function bonusOptionsForPolicy(raw) {
-  const state = groupState.get(groupKeyFor(raw));
-  if (!state) return {};
+// Per-policy options for the deriver. The two booleans come from the global
+// toggles; rates are deliberately NOT supplied here so derive() falls back
+// to its own per-policy auto-lookup (which uses raw.product + raw.variation
+// + this policy's actual annualPremium tier).
+function bonusOptionsForPolicy(_raw) {
   return {
-    excludeWelcomeBonus: state.excludeWelcome,
-    excludeAnnualPremiumBonus: state.excludeAnnual,
-    welcomeBonusRate: state.welcomeRate,
-    annualPremiumBonusRate: state.annualPremiumRate,
+    excludeWelcomeBonus: excludeWelcomeEl.checked,
+    excludeAnnualPremiumBonus: excludeAnnualEl.checked,
   };
+}
+
+// Wire the global toggles. The handlers re-render the entire batch with
+// fresh per-policy rates picked up from the rate tables.
+excludeWelcomeEl.addEventListener('change', () => {
+  refreshBonusTotals();
+  scheduleRerender();
+});
+excludeAnnualEl.addEventListener('change', () => {
+  refreshBonusTotals();
+  scheduleRerender();
+});
+
+function refreshBonusTotals() {
+  // Show the total welcome / annual bonus dollars across all uploaded
+  // policies — informational, doesn't depend on the checkbox state. Helps
+  // the user see what's at stake before they tick.
+  const policies = allParsedPolicies();
+  if (!policies.length) {
+    welcomeTotalEl.textContent = '—';
+    annualTotalEl.textContent = '—';
+    return;
+  }
+  let welcomeSum = 0, annualSum = 0;
+  for (const { raw } of policies) {
+    const ap = annualPremiumFor(raw);
+    const auto = lookupBonusRates(raw.product, raw.variation, ap);
+    welcomeSum += ap * (auto.welcomeRate || 0);
+    annualSum += ap * (auto.annualPremiumRate || 0);
+  }
+  welcomeTotalEl.textContent = `S$${fmt0(welcomeSum)} total`;
+  annualTotalEl.textContent = `S$${fmt0(annualSum)} total`;
+}
+
+function renderBonusGroups() {
+  // Kept as a single function name so the rest of the file (processNewFiles)
+  // doesn't change; it now drives the simpler detected-summary panel.
+  renderDetectedSummary();
+  refreshBonusTotals();
 }
 
 async function updateAllRendered({ trigger = 'rerender' } = {}) {
@@ -522,61 +457,16 @@ async function updateAllRendered({ trigger = 'rerender' } = {}) {
   }
   if (!successes.length) {
     resultSection.hidden = true;
+    teardownPreviewUrls();
+    currentSuccesses = [];
     return;
   }
 
-  // Preview is the FIRST successful policy (first PDF, first policy).
-  const first = successes[0];
-  const firstFilename = buildFilename(first.raw.customerName, first.raw.policyNumber, first.raw.reportDate);
-  if (lastPreviewUrl) URL.revokeObjectURL(lastPreviewUrl);
-  const firstUrl = URL.createObjectURL(first.blob);
-  lastPreviewUrl = firstUrl;
-  previewImg.src = firstUrl;
-  previewFilenameEl.textContent = firstFilename;
-
-  // Phase 9F — remember the latest preview for the Save-to-Drive button.
-  lastPreviewBlob = first.blob;
-  lastPreviewMeta = {
-    clientName:  first.raw.customerName || '',
-    reportTitle: first.data?.product || '',
-    reportId:    first.raw.policyNumber || '',
-    date:        first.raw.reportDate || '',
-  };
-  if (driveSaveBtn) driveSaveBtn.disabled = false;
-
-  // Free the previous single-download URL before assigning a new one, and
-  // free the ZIP URL before building a new ZIP — without this each batch
-  // leaks ~20 MB of blob storage that the browser can't reclaim until the
-  // page is reloaded.
-  if (lastSingleDownloadUrl) URL.revokeObjectURL(lastSingleDownloadUrl);
-  lastSingleDownloadUrl = null;
-  if (lastZipUrl) URL.revokeObjectURL(lastZipUrl);
-  lastZipUrl = null;
-
-  if (successes.length === 1) {
-    downloadBtn.href = firstUrl;
-    downloadBtn.download = firstFilename;
-    downloadLabel.textContent = 'Download PNG';
-    resultCountEl.textContent = 'PNG ready · 1 of 1';
-    lastSingleDownloadUrl = firstUrl;
-  } else {
-    // eslint-disable-next-line no-undef
-    const zip = new JSZip();
-    for (const s of successes) {
-      const fname = buildFilename(s.raw.customerName, s.raw.policyNumber, s.raw.reportDate);
-      zip.file(fname, s.blob);
-    }
-    const zipBlob = await zip.generateAsync({ type: 'blob' });
-    lastZipUrl = URL.createObjectURL(zipBlob);
-    const zipName = `manulife-snapshots-${new Date().toISOString().slice(0, 10)}.zip`;
-    downloadBtn.href = lastZipUrl;
-    downloadBtn.download = zipName;
-    downloadLabel.textContent = `Download ZIP (${successes.length})`;
-    resultCountEl.textContent = `PNG ready · ${successes.length} of ${policies.length}`;
-  }
-
-  buildDeltaCard(first.raw, first.data);
-  resultSection.hidden = false;
+  // Hand the freshly rendered batch to the preview/carousel layer. It owns
+  // URL lifecycles, current-index clamping, thumbnail rendering, and the
+  // delta card refresh. Must be awaited — the ZIP build inside is async
+  // and the success toast fires off the same updateAllRendered() return.
+  await installSuccesses(successes, policies.length);
 
   // Last non-preempted pass: swap the toast into its success state and let
   // it auto-fade. Earlier passes that got overtaken by a newer toggle bailed
@@ -607,6 +497,191 @@ function countDistinctPdfs(successes) {
   for (const s of successes) seen.add(s.item);
   return seen.size;
 }
+
+
+// ---------- Preview navigation + thumbnail carousel --------------------------
+//
+// Owns the rendered-snapshot URL lifecycle and the user's current selection.
+// installSuccesses() takes the array produced by updateAllRendered and:
+//   1. Revokes every URL handed out on the previous pass (preview, ZIP, all
+//      thumbnails) so we don't leak ~500 KB per blob across re-renders.
+//   2. Mints fresh URLs for each new blob.
+//   3. Clamps the previously-selected index so it survives a re-render
+//      losing or gaining policies.
+//   4. Builds the carousel + nav bar.
+//   5. Calls setCurrentPreview() to wire the main preview, download button,
+//      and delta card to the active snapshot.
+
+let currentSuccesses = [];          // [{ item, raw, blob, data, url, filename }]
+let currentPreviewIndex = 0;
+let lastPolicyKey = null;           // raw -> stable key, used to keep selection across re-renders
+
+// Anchor the selection to the queue item's stable id PLUS the policy number,
+// so uploading the same PDF twice (or a multi-policy PDF) gives each
+// snapshot a distinct key. The queue id is generated when the user drops
+// the file and survives re-renders.
+function policyKey(item, raw) {
+  return `${item?.id || 'unknown'}::${raw?.policyNumber || ''}`;
+}
+
+function teardownPreviewUrls() {
+  // Revoke EVERY blob URL we've ever handed to the preview / thumbnails /
+  // single-download / ZIP. Without this each re-render leaks ~500 KB per
+  // policy; on a 20-policy batch the leaked footprint matches the live one
+  // every toggle, and Chrome eventually starts failing renders mid-flight.
+  for (const s of currentSuccesses) {
+    if (s.url) URL.revokeObjectURL(s.url);
+  }
+  if (lastSingleDownloadUrl) URL.revokeObjectURL(lastSingleDownloadUrl);
+  lastSingleDownloadUrl = null;
+  if (lastZipUrl) URL.revokeObjectURL(lastZipUrl);
+  lastZipUrl = null;
+  // lastPreviewUrl is always one of the per-success urls — it's already revoked
+  // by the loop above, so just clear the pointer.
+  lastPreviewUrl = null;
+}
+
+async function installSuccesses(successes, totalPoliciesAttempted) {
+  // Step 1: free old URLs before allocating new ones.
+  teardownPreviewUrls();
+
+  // Step 2: enrich each success with its persistent objectURL + display name.
+  currentSuccesses = successes.map(s => {
+    const url = URL.createObjectURL(s.blob);
+    const filename = buildFilename(s.raw.customerName, s.raw.policyNumber, s.raw.reportDate);
+    return { ...s, url, filename };
+  });
+
+  // Step 3: try to keep the user on the same policy across re-renders. If
+  // the previous selection's policy is still in the new batch, re-anchor.
+  // Otherwise default to the first.
+  let nextIndex = 0;
+  if (lastPolicyKey) {
+    const found = currentSuccesses.findIndex(s => policyKey(s.item, s.raw) === lastPolicyKey);
+    if (found >= 0) nextIndex = found;
+  }
+  currentPreviewIndex = nextIndex;
+
+  // Step 4: build the ZIP (multi-policy only) — used by the Download button
+  // when there's more than one snapshot.
+  if (currentSuccesses.length > 1) {
+    // eslint-disable-next-line no-undef
+    const zip = new JSZip();
+    for (const s of currentSuccesses) zip.file(s.filename, s.blob);
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    lastZipUrl = URL.createObjectURL(zipBlob);
+  }
+
+  // Step 5: render the carousel (only visible when >1 snapshot).
+  renderCarousel();
+
+  // Step 6: header counter — "PNG ready · 14 of 20".
+  resultCountEl.textContent = `PNG ready · ${currentSuccesses.length} of ${totalPoliciesAttempted}`;
+
+  // Step 7: set the active preview / download / delta card.
+  setCurrentPreview(currentPreviewIndex);
+  resultSection.hidden = false;
+}
+
+function setCurrentPreview(index) {
+  if (!currentSuccesses.length) return;
+  const clamped = Math.max(0, Math.min(currentSuccesses.length - 1, index));
+  currentPreviewIndex = clamped;
+  const s = currentSuccesses[clamped];
+  lastPolicyKey = policyKey(s.item, s.raw);
+
+  // Preview image + filename.
+  previewImg.src = s.url;
+  previewFilenameEl.textContent = s.filename;
+  lastPreviewUrl = s.url;
+
+  // Save-to-Drive context refers to the currently displayed snapshot.
+  lastPreviewBlob = s.blob;
+  lastPreviewMeta = {
+    clientName:  s.raw.customerName || '',
+    reportTitle: s.data?.product || '',
+    reportId:    s.raw.policyNumber || '',
+    date:        s.raw.reportDate || '',
+  };
+  if (driveSaveBtn) driveSaveBtn.disabled = false;
+
+  // Download button: single PDF → individual PNG, multi → ZIP of all.
+  if (currentSuccesses.length === 1) {
+    downloadBtn.href = s.url;
+    downloadBtn.download = s.filename;
+    downloadLabel.textContent = 'Download PNG';
+    lastSingleDownloadUrl = s.url;
+  } else {
+    downloadBtn.href = lastZipUrl;
+    downloadBtn.download = `manulife-snapshots-${new Date().toISOString().slice(0, 10)}.zip`;
+    downloadLabel.textContent = `Download ZIP (${currentSuccesses.length})`;
+  }
+
+  // Nav bar: hide when there's only one snapshot, otherwise update counter
+  // and disabled-state for prev/next at the boundaries.
+  if (currentSuccesses.length > 1) {
+    previewNavBar.hidden = false;
+    previewCounterEl.textContent = `${clamped + 1} of ${currentSuccesses.length}`;
+    prevPreviewBtn.disabled = clamped === 0;
+    nextPreviewBtn.disabled = clamped === currentSuccesses.length - 1;
+  } else {
+    previewNavBar.hidden = true;
+  }
+
+  // Highlight the active thumbnail and scroll it into view.
+  for (const t of carouselStripEl.children) {
+    t.classList.toggle('active', Number(t.dataset.index) === clamped);
+  }
+  const activeThumb = carouselStripEl.children[clamped];
+  if (activeThumb) {
+    activeThumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }
+
+  // Delta card reflects the SELECTED snapshot, not always the first.
+  buildDeltaCard(s.raw, s.data);
+}
+
+function renderCarousel() {
+  carouselStripEl.innerHTML = '';
+  if (currentSuccesses.length <= 1) {
+    carouselEl.hidden = true;
+    return;
+  }
+  carouselEl.hidden = false;
+  for (let i = 0; i < currentSuccesses.length; i++) {
+    const s = currentSuccesses[i];
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'carousel-thumb';
+    btn.dataset.index = String(i);
+    const shortLabel = s.raw.customerName
+      ? s.raw.customerName.split(/\s+/).slice(0, 2).join(' ')
+      : `Policy ${i + 1}`;
+    btn.innerHTML = `
+      <img src="${s.url}" alt="Snapshot ${i + 1}" loading="lazy">
+      <span class="thumb-label">${esc(shortLabel)}</span>
+    `;
+    btn.addEventListener('click', () => setCurrentPreview(i));
+    carouselStripEl.appendChild(btn);
+  }
+}
+
+prevPreviewBtn.addEventListener('click', () => setCurrentPreview(currentPreviewIndex - 1));
+nextPreviewBtn.addEventListener('click', () => setCurrentPreview(currentPreviewIndex + 1));
+
+// Keyboard arrows navigate the carousel — except when the user is typing in
+// an input/textarea (don't fight the browser's caret movement).
+document.addEventListener('keydown', (e) => {
+  if (currentSuccesses.length < 2) return;
+  if (e.target.matches('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    setCurrentPreview(currentPreviewIndex - 1);
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    setCurrentPreview(currentPreviewIndex + 1);
+  }
+});
 
 
 // ---------- Delta card -------------------------------------------------------
