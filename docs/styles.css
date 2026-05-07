@@ -412,6 +412,12 @@ body::after {
   border-radius: 10px;
   font-size: 13px;
   color: var(--ink-2);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+.file-row.fading-out {
+  opacity: 0;
+  transform: translateX(8px);
+  pointer-events: none;
 }
 .file-row .icn { color: var(--ink-3); width: 14px; height: 14px; }
 .file-row .name {

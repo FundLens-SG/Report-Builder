@@ -42,6 +42,12 @@ const deltaCardEl = document.getElementById('delta-card');
 // button always saves the currently displayed report.
 let lastPreviewBlob = null;
 let lastPreviewMeta = null;
+// Track every object URL we hand out so we can revoke previous ones when a
+// new render lands. Without this, each batch leaks ~500 KB per snapshot
+// (multiplied across re-renders triggered by bonus toggles) and the browser
+// eventually starts failing renders on memory-constrained machines.
+let lastPreviewUrl = null;
+let lastSingleDownloadUrl = null;
 
 const STATUS_LABELS = {
   queued: 'Queued',
@@ -134,7 +140,7 @@ function addFiles(files) {
     li.querySelector('.name').textContent = file.name;
     li.querySelector('.size').textContent = formatBytes(file.size);
     fileList.appendChild(li);
-    queue.push({ id, file, badgeEl: li.querySelector('.badge') });
+    queue.push({ id, file, li, badgeEl: li.querySelector('.badge') });
   }
   // Process the newly added files (existing 'done' files stay in the list).
   processNewFiles().catch(err => {
@@ -142,9 +148,34 @@ function addFiles(files) {
   });
 }
 
-function setStatus(item, status) {
+function setStatus(item, status, errorMessage) {
   item.badgeEl.className = `badge ${status}`;
   item.badgeEl.innerHTML = `<span class="dot"></span>${STATUS_LABELS[status] ?? status}`;
+  // Surface the failure reason via the badge tooltip so the user can hover
+  // to see exactly what went wrong (e.g. "Missing required fields ..."),
+  // instead of guessing why a row is red.
+  if (status === 'failed' && errorMessage) {
+    item.badgeEl.title = errorMessage;
+  } else {
+    item.badgeEl.removeAttribute('title');
+  }
+}
+
+// Remove the file's row from the list once it reaches a terminal state. The
+// `raws` data stays in `queue` so re-renders (bonus toggles) still work; we
+// only detach the visible <li>. This keeps the list short across long
+// sessions where the user uploads many batches in sequence.
+const REMOVE_DELAY_MS = 1500;  // long enough to read "Done"
+function scheduleRowRemoval(item) {
+  if (item.removalScheduled) return;
+  item.removalScheduled = true;
+  setTimeout(() => {
+    if (!item.li || !item.li.parentNode) return;
+    item.li.classList.add('fading-out');
+    setTimeout(() => {
+      if (item.li && item.li.parentNode) item.li.remove();
+    }, 250);
+  }, REMOVE_DELAY_MS);
 }
 
 async function processNewFiles() {
@@ -160,7 +191,8 @@ async function processNewFiles() {
     } catch (err) {
       console.error(`Failed to parse ${item.file.name}:`, err);
       item.error = err?.message ?? String(err);
-      setStatus(item, 'failed');
+      setStatus(item, 'failed', item.error);
+      scheduleRowRemoval(item);
     }
   }
 
@@ -285,9 +317,12 @@ async function updateAllRendered() {
   }
   if (myToken !== renderToken) return;
 
-  // Update each file row's badge to reflect aggregate success across its policies.
+  // Update each file row's badge to reflect aggregate success across its
+  // policies, then remove the row from the list once it has settled.
   for (const [item, tally] of renderedByItem) {
-    setStatus(item, tally.fail > 0 && tally.ok === 0 ? 'failed' : 'done');
+    const failed = tally.fail > 0 && tally.ok === 0;
+    setStatus(item, failed ? 'failed' : 'done', failed ? item.error : undefined);
+    scheduleRowRemoval(item);
   }
   if (!successes.length) {
     resultSection.hidden = true;
@@ -297,7 +332,9 @@ async function updateAllRendered() {
   // Preview is the FIRST successful policy (first PDF, first policy).
   const first = successes[0];
   const firstFilename = buildFilename(first.raw.customerName, first.raw.policyNumber, first.raw.reportDate);
+  if (lastPreviewUrl) URL.revokeObjectURL(lastPreviewUrl);
   const firstUrl = URL.createObjectURL(first.blob);
+  lastPreviewUrl = firstUrl;
   previewImg.src = firstUrl;
   previewFilenameEl.textContent = firstFilename;
 
@@ -311,13 +348,22 @@ async function updateAllRendered() {
   };
   if (driveSaveBtn) driveSaveBtn.disabled = false;
 
+  // Free the previous single-download URL before assigning a new one, and
+  // free the ZIP URL before building a new ZIP — without this each batch
+  // leaks ~20 MB of blob storage that the browser can't reclaim until the
+  // page is reloaded.
+  if (lastSingleDownloadUrl) URL.revokeObjectURL(lastSingleDownloadUrl);
+  lastSingleDownloadUrl = null;
+  if (lastZipUrl) URL.revokeObjectURL(lastZipUrl);
+  lastZipUrl = null;
+
   if (successes.length === 1) {
     downloadBtn.href = firstUrl;
     downloadBtn.download = firstFilename;
     downloadLabel.textContent = 'Download PNG';
     resultCountEl.textContent = 'PNG ready · 1 of 1';
+    lastSingleDownloadUrl = firstUrl;
   } else {
-    if (lastZipUrl) URL.revokeObjectURL(lastZipUrl);
     // eslint-disable-next-line no-undef
     const zip = new JSZip();
     for (const s of successes) {

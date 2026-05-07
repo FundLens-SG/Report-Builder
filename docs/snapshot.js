@@ -43,10 +43,18 @@ export async function renderToPng(data) {
   const node = buildSnapshotElement(data);
   stage.appendChild(node);
 
+  // Track the Chart and the captured canvas so we can free them in finally —
+  // Chart.js holds a reference to its canvas in a global instance registry,
+  // so without an explicit destroy() the canvas (and its retained pixel
+  // buffer) survives DOM removal. Across a 40-file batch this leak alone
+  // adds up to hundreds of MB and causes html2canvas to fail mid-flight on
+  // memory-constrained machines.
+  let chart = null;
+  let captured = null;
   try {
     const canvas = node.querySelector('#alloc-donut');
     // eslint-disable-next-line no-undef
-    new Chart(canvas, {
+    chart = new Chart(canvas, {
       type: 'doughnut',
       data: {
         labels: data.holdingsEnriched.map(h => `${h.displayName} (${h.ticker})`),
@@ -71,7 +79,7 @@ export async function renderToPng(data) {
     await new Promise(r => setTimeout(r, 80));
 
     // eslint-disable-next-line no-undef
-    const captured = await html2canvas(node, {
+    captured = await html2canvas(node, {
       backgroundColor: '#ffffff',
       scale: 2,
       useCORS: true,
@@ -80,6 +88,13 @@ export async function renderToPng(data) {
 
     return await new Promise((resolve) => captured.toBlob(blob => resolve(blob), 'image/png'));
   } finally {
+    if (chart) {
+      try { chart.destroy(); } catch (_e) { /* defensive */ }
+    }
+    if (captured) {
+      // Force the html2canvas-produced canvas to release its backing store.
+      try { captured.width = 0; captured.height = 0; } catch (_e) { /* defensive */ }
+    }
     node.remove();
   }
 }
