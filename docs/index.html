@@ -107,7 +107,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg>
           Choose PDFs
         </button>
-        <span class="dz-spec" style="margin: 0;"><span><b>Supported</b> InvestReady Growth · InvestReady (III)</span></span>
+        <span class="dz-spec" style="margin: 0;"><span><b>Auto-detect</b> InvestReady Growth · InvestReady (III) <span class="dim">— other Manulife products parse fine, bonus rates editable manually</span></span></span>
       </div>
       <input id="file-input" type="file" accept="application/pdf" multiple hidden>
     </label>
@@ -124,7 +124,11 @@
   <!-- File list (collapses when empty via :empty rule in styles.css) -->
   <ul class="file-list" id="file-list"></ul>
 
-  <!-- Adjustments / bonus panel -->
+  <!-- Adjustments / bonus panel.
+       One card per detected product+variation across the upload. Each card
+       owns its own checkboxes + rate inputs so a 20-policy / 5-product
+       batch surfaces 5 independent control groups instead of one global
+       toggle pretending to fit all. -->
   <div id="adjustments-block" hidden>
     <div class="section-h">
       <span class="label">— Adjustments</span>
@@ -136,54 +140,9 @@
         <span class="helper">Updates the snapshot live</span>
       </header>
 
-      <div class="bonus-detected">
-        <div class="col">
-          <div class="lbl">Detected product <span class="auto">AUTO</span></div>
-          <div class="val" id="detected-product">—</div>
-          <div class="sub" id="detected-variation-line">—</div>
-        </div>
-        <div class="col">
-          <div class="lbl">Detected bonus rates <span class="auto">AUTO</span></div>
-          <div class="val" id="detected-rates">—</div>
-          <div class="sub">Welcome (Year 1)&nbsp;&nbsp;·&nbsp;&nbsp;Annual premium</div>
-        </div>
-      </div>
+      <div id="bonus-groups" class="bonus-groups"></div>
 
-      <div class="bonus-rows">
-        <div class="bonus-row">
-          <label class="bonus-check">
-            <input type="checkbox" id="exclude-welcome">
-            <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span>
-          </label>
-          <div class="meta">
-            <span class="ttl">Exclude Welcome Bonus from IRR</span>
-            <span class="desc">First-year-only bonus, paid by Manulife at policy inception.</span>
-          </div>
-          <div class="rate-input">
-            <input type="number" id="welcome-rate" value="0" step="0.1" min="0" max="100" inputmode="decimal">
-            <span class="suffix">%</span>
-          </div>
-          <div class="bonus-amount" id="welcome-amount">S$0.00</div>
-        </div>
-
-        <div class="bonus-row">
-          <label class="bonus-check">
-            <input type="checkbox" id="exclude-annual">
-            <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span>
-          </label>
-          <div class="meta">
-            <span class="ttl">Exclude Annual Premium Bonus from IRR</span>
-            <span class="desc">Recurring bonus paid each premium year. Override the rate for custom campaigns.</span>
-          </div>
-          <div class="rate-input">
-            <input type="number" id="annual-rate" value="0" step="0.1" min="0" max="100" inputmode="decimal">
-            <span class="suffix">%</span>
-          </div>
-          <div class="bonus-amount" id="annual-amount">S$0.00</div>
-        </div>
-      </div>
-
-      <p class="bonus-foot">Excluded bonuses are added to the cost basis — net gain, total return, and annualised IRR fall accordingly. The rates above default to Manulife's published values; override only for custom campaigns.</p>
+      <p class="bonus-foot">Excluded bonuses are added to the cost basis — net gain, total return, and annualised IRR fall accordingly. Rates auto-fill from Manulife's published values where the product is detected; for other products the rates default to <strong>0%</strong> but stay editable so you can apply custom-campaign rates manually.</p>
     </section>
   </div>
 

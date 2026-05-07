@@ -306,10 +306,14 @@ body::after {
   font-family: var(--mono);
   font-size: 10.5px;
   letter-spacing: 0.04em;
-  color: var(--ink-4);
+  /* Bumped one level — used to wash out behind the warm CTA button */
+  color: var(--ink-3);
 }
 .dropzone .dz-spec b {
-  color: var(--ink-2); font-weight: 500;
+  color: var(--ink); font-weight: 500;
+}
+.dropzone .dz-spec .dim {
+  color: var(--ink-4);
 }
 
 /* Sample peek — silhouette of the snapshot, faint */
@@ -500,49 +504,77 @@ body::after {
   color: var(--ink-3);
 }
 
-.bonus-detected {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0;
-  background: var(--bg-inset);
-  border-bottom: 1px solid var(--hairline);
+/* One card per detected (product, variation) group. Cards stack inside
+   the bonus panel; a 1-policy upload renders one card, a mixed batch
+   renders one per group. Each card owns its own checkboxes + rate inputs. */
+.bonus-groups {
+  padding: 4px 0;
 }
-.bonus-detected .col {
-  padding: 18px 24px;
+.bonus-group {
+  padding: 0;
 }
-.bonus-detected .col + .col { border-left: 1px solid var(--hairline); }
-.bonus-detected .lbl {
+.bonus-group + .bonus-group {
+  border-top: 1px solid var(--hairline);
+}
+
+.bonus-group-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 24px 10px;
+}
+.bonus-group-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.bonus-group-title h4 {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+  margin: 0;
+}
+.bonus-group-meta {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  /* Bumped from --ink-4 / --ink-3 (used to feel washed out on dark cards) */
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.bonus-group-meta strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* DETECTED / MANUAL pills next to the group title.
+   - DETECTED: warm accent (auto-filled rates from rate tables)
+   - MANUAL:   muted grey (no published rates, user types their own) */
+.bonus-pill {
   font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.16em;
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ink-4);
-  margin-bottom: 6px;
-  display: flex; align-items: center; gap: 8px;
-}
-.bonus-detected .lbl .auto {
-  font-family: var(--mono);
-  font-size: 9px;
-  padding: 2px 7px;
+  padding: 3px 9px;
   border-radius: 999px;
+  white-space: nowrap;
+}
+.bonus-pill.detected {
   background: var(--accent-dim);
   color: var(--accent);
-  letter-spacing: 0.1em;
 }
-.bonus-detected .val {
-  font-size: 18px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-}
-.bonus-detected .sub {
-  font-size: 12px;
-  color: var(--ink-3);
-  margin-top: 2px;
+.bonus-pill.manual {
+  background: oklch(1 0 0 / 0.06);
+  color: var(--ink-2);
+  border: 1px solid var(--hairline-2);
 }
 
 .bonus-rows {
-  padding: 8px 0;
+  padding: 4px 0 8px;
 }
 .bonus-row {
   display: grid;
@@ -596,7 +628,10 @@ body::after {
 }
 .bonus-row .meta .desc {
   font-size: 12px;
-  color: var(--ink-3);
+  /* Bumped from --ink-3 — was reading as faded layout filler instead of
+     a usable hint at small sizes against the dark card. */
+  color: var(--ink-2);
+  line-height: 1.45;
 }
 
 .rate-input {
@@ -637,12 +672,17 @@ body::after {
 }
 
 .bonus-foot {
-  padding: 12px 24px;
+  padding: 14px 24px;
   border-top: 1px solid var(--hairline);
   font-size: 12px;
   line-height: 1.5;
-  color: var(--ink-4);
+  /* Was --ink-4 (very dim) — bumped one level for legibility on dark card */
+  color: var(--ink-3);
   background: oklch(0.13 0.005 80 / 0.35);
+}
+.bonus-foot strong {
+  color: var(--ink);
+  font-weight: 500;
 }
 
 /* ── Result ────────────────────────────────────────────────────── */

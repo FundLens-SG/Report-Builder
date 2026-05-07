@@ -6,7 +6,7 @@ import { parsePdf } from './parser.js';
 import { derive } from './deriver.js';
 import { renderToPng } from './snapshot.js';
 import { buildFilename } from './naming.js';
-import { PRODUCTS } from './bonus.js';
+import { PRODUCTS, lookupBonusRates } from './bonus.js';
 
 // ---- DOM lookups ------------------------------------------------------------
 
@@ -17,15 +17,7 @@ const chooseBtn = document.getElementById('choose-btn');
 const fileList = document.getElementById('file-list');
 
 const adjustmentsBlock = document.getElementById('adjustments-block');
-const detectedProductEl = document.getElementById('detected-product');
-const detectedVariationLineEl = document.getElementById('detected-variation-line');
-const detectedRatesEl = document.getElementById('detected-rates');
-const excludeWelcomeEl = document.getElementById('exclude-welcome');
-const excludeAnnualEl = document.getElementById('exclude-annual');
-const welcomeRateEl = document.getElementById('welcome-rate');
-const annualRateEl = document.getElementById('annual-rate');
-const welcomeAmountEl = document.getElementById('welcome-amount');
-const annualAmountEl = document.getElementById('annual-amount');
+const bonusGroupsEl = document.getElementById('bonus-groups');
 
 const resultSection = document.getElementById('result-section');
 const resultCountEl = document.getElementById('result-count');
@@ -103,19 +95,6 @@ fileInput.addEventListener('change', () => {
 
 let rerenderTimer = null;
 function scheduleRerender() {
-  // Sync rate-input editability with each toggle's checked state.
-  welcomeRateEl.readOnly = !excludeWelcomeEl.checked;
-  annualRateEl.readOnly = !excludeAnnualEl.checked;
-  // Refresh the bonus-dollar labels immediately so they track the rate input
-  // as the user types — only the (debounced) snapshot re-render is deferred.
-  const firstParsed = queue.find(q => q.raws && q.raws.length);
-  if (firstParsed) {
-    const recognised = firstParsed.raws.find(r =>
-      r.product && r.variation && PRODUCTS[r.product]?.variations?.[r.variation]
-    );
-    const target = recognised || firstParsed.raws[0];
-    updateBonusAmounts(derive(target, {}).annualPremium);
-  }
   // Show the toast IMMEDIATELY (during the 90 ms debounce window) so the
   // user sees acknowledgement of their click before the actual render
   // starts. Otherwise a 20-policy re-render reads as silence.
@@ -174,8 +153,8 @@ function hideRenderToast() {
     if (!renderToastEl.classList.contains('show')) renderToastEl.hidden = true;
   }, 240);
 }
-[excludeWelcomeEl, excludeAnnualEl].forEach(el => el.addEventListener('change', scheduleRerender));
-[welcomeRateEl, annualRateEl].forEach(el => el.addEventListener('input', scheduleRerender));
+// Per-group bonus listeners are wired up dynamically inside renderBonusGroups
+// — see the `change` / `input` delegation on the bonus-groups container.
 
 
 // ---------- File queue -------------------------------------------------------
@@ -254,12 +233,11 @@ async function processNewFiles() {
     }
   }
 
-  populateBonusPanelFromFirst();
+  renderBonusGroups();
   await updateAllRendered({ trigger: 'parse' });
 }
 
-// Each policy across all parsed PDFs becomes its own render target. Used by
-// updateAllRendered + populateBonusPanelFromFirst.
+// Each policy across all parsed PDFs becomes its own render target.
 function allParsedPolicies() {
   const out = [];
   for (const item of queue) {
@@ -272,71 +250,219 @@ function allParsedPolicies() {
 }
 
 
-// ---------- Bonus panel ------------------------------------------------------
+// ---------- Bonus panel: per-product groups ---------------------------------
+//
+// A "group" is one (product, variation) cluster. Every policy in a group
+// shares the same checkboxes and rate inputs — flipping Exclude Welcome on
+// the InvestReady (III) · 13Y Flexi 10 card affects only the InvestReady (III)
+// 13Y Flexi 10 policies. A 1-policy upload gets one card; a mixed batch gets
+// one per detected product. State persists across re-renders (groupState
+// Map) so user overrides survive subsequent uploads.
 
-function populateBonusPanelFromFirst() {
-  // Use the first policy that has a recognised product, falling back to the
-  // first policy of the first parsed PDF. Multi-policy PDFs typically include
-  // a Manulink/SRS variant alongside an InvestReady variant — we prefer the
-  // recognised one so the bonus panel actually has detected rates to show.
-  const policies = allParsedPolicies();
-  if (!policies.length) return;
-  const recognisedFirst = policies.find(({ raw }) =>
-    raw.product && raw.variation && PRODUCTS[raw.product]?.variations?.[raw.variation]
-  );
-  const target = (recognisedFirst || policies[0]).raw;
+const groupState = new Map();   // groupKey -> { excludeWelcome, excludeAnnual, welcomeRate, annualRate, touched }
 
-  const preview = derive(target, {});
-  const recognised = !!(target.product && target.variation
-    && PRODUCTS[target.product]?.variations?.[target.variation]);
-
-  if (recognised) {
-    detectedProductEl.textContent = PRODUCTS[target.product].label;
-    detectedVariationLineEl.textContent = `${target.variation}  ·  S$${fmt0(preview.annualPremium)} annual`;
-    detectedRatesEl.textContent = `${fmtPct1(preview.welcomeBonusRate * 100)}% · ${fmtPct1(preview.annualPremiumBonusRate * 100)}%`;
-  } else {
-    detectedProductEl.textContent = 'Not auto-detected';
-    detectedVariationLineEl.textContent = 'Set the rates manually below';
-    detectedRatesEl.textContent = '— · —';
+function groupKeyFor(raw) {
+  // Recognised products group by product+variation. Anything else groups by
+  // its own policyName so distinct unrecognised products don't get conflated.
+  if (raw.product && raw.variation && PRODUCTS[raw.product]?.variations?.[raw.variation]) {
+    return `auto::${raw.product}::${raw.variation}`;
   }
+  return `manual::${raw.policyName || 'Unknown'}`;
+}
 
-  // Auto-fill the rate inputs only on the FIRST populate so user overrides stick.
-  if (!welcomeRateEl.dataset.touched) {
-    welcomeRateEl.value = (preview.welcomeBonusRate * 100).toFixed(1);
-    annualRateEl.value = (preview.annualPremiumBonusRate * 100).toFixed(1);
+function annualPremiumFor(raw) {
+  // Mirrors deriver.js — used to compute the avg annual premium shown on a
+  // group card and to look up tiered welcome rates without round-tripping
+  // through derive().
+  return derive(raw, {}).annualPremium;
+}
+
+// Build the groups data structure from current parsed policies. Each group
+// holds the policies that landed in it plus the SAME state object referenced
+// from groupState (mutating it in place updates the live state).
+function computeBonusGroups() {
+  const groups = new Map();
+  for (const item of queue) {
+    if (!item.raws) continue;
+    for (const raw of item.raws) {
+      const key = groupKeyFor(raw);
+      if (!groups.has(key)) {
+        const recognised = !!(raw.product && raw.variation
+          && PRODUCTS[raw.product]?.variations?.[raw.variation]);
+        groups.set(key, {
+          key,
+          recognised,
+          product: raw.product,
+          variation: raw.variation,
+          policyName: raw.policyName,
+          policies: [],
+          totalCost: 0,
+          totalPaidYears: 0,
+        });
+      }
+      const grp = groups.get(key);
+      grp.policies.push(raw);
+      const ap = annualPremiumFor(raw);
+      grp.totalCost += raw.policyInvestmentCost || 0;
+      grp.totalPaidYears += raw.policyInvestmentCost && ap ? raw.policyInvestmentCost / ap : 0;
+    }
   }
-  welcomeRateEl.readOnly = !excludeWelcomeEl.checked;
-  annualRateEl.readOnly = !excludeAnnualEl.checked;
-  updateBonusAmounts(preview.annualPremium);
+  return groups;
+}
 
+function ensureGroupState(grp, avgAnnual) {
+  let state = groupState.get(grp.key);
+  if (!state) {
+    // First time we see this group: prefill from the rate tables. For
+    // unrecognised products both rates default to 0 — the user can still
+    // type a campaign rate without ticking the box first, then tick.
+    const auto = grp.recognised
+      ? lookupBonusRates(grp.product, grp.variation, avgAnnual)
+      : { welcomeRate: 0, annualPremiumRate: 0, recognised: false };
+    state = {
+      excludeWelcome: false,
+      excludeAnnual: false,
+      welcomeRate: auto.welcomeRate || 0,
+      annualPremiumRate: auto.annualPremiumRate || 0,
+      touched: false,  // user has manually edited at least one rate
+    };
+    groupState.set(grp.key, state);
+  }
+  return state;
+}
+
+function renderBonusGroups() {
+  const groups = computeBonusGroups();
+  if (!groups.size) {
+    adjustmentsBlock.hidden = true;
+    return;
+  }
   adjustmentsBlock.hidden = false;
+  bonusGroupsEl.innerHTML = '';
+
+  for (const grp of groups.values()) {
+    const avgAnnual = grp.policies.length
+      ? grp.policies.reduce((s, raw) => s + annualPremiumFor(raw), 0) / grp.policies.length
+      : 0;
+    const state = ensureGroupState(grp, avgAnnual);
+
+    const card = document.createElement('div');
+    card.className = 'bonus-group';
+    card.dataset.key = grp.key;
+
+    const title = grp.recognised
+      ? `${PRODUCTS[grp.product].label} · ${esc(grp.variation)}`
+      : esc(grp.policyName || 'Unrecognised product');
+    const pill = grp.recognised
+      ? '<span class="bonus-pill detected">DETECTED</span>'
+      : '<span class="bonus-pill manual">MANUAL</span>';
+
+    const policiesWord = `${grp.policies.length} polic${grp.policies.length === 1 ? 'y' : 'ies'}`;
+    const meta = grp.recognised
+      ? `${policiesWord} · annual premium <strong>S$${fmt0(avgAnnual)}</strong>`
+      : `${policiesWord} · No published bonus rates — defaults to <strong>0%</strong>, edit manually if a campaign applies`;
+
+    card.innerHTML = `
+      <div class="bonus-group-head">
+        <div>
+          <div class="bonus-group-title"><h4>${title}</h4>${pill}</div>
+          <p class="bonus-group-meta">${meta}</p>
+        </div>
+      </div>
+      <div class="bonus-rows">
+        ${bonusRowMarkup({
+          field: 'welcome',
+          title: 'Exclude Welcome Bonus from IRR',
+          desc: 'First-year-only bonus, paid by Manulife at policy inception.',
+          checked: state.excludeWelcome,
+          rate: state.welcomeRate,
+          amount: avgAnnual * state.welcomeRate,
+        })}
+        ${bonusRowMarkup({
+          field: 'annual',
+          title: 'Exclude Annual Premium Bonus from IRR',
+          desc: 'Recurring bonus paid each premium year. Override the rate for custom campaigns.',
+          checked: state.excludeAnnual,
+          rate: state.annualPremiumRate,
+          amount: avgAnnual * state.annualPremiumRate,
+        })}
+      </div>
+    `;
+    bonusGroupsEl.appendChild(card);
+  }
 }
 
-function updateBonusAmounts(annualPremium) {
-  const w = (parseFloat(welcomeRateEl.value) || 0) / 100;
-  const a = (parseFloat(annualRateEl.value) || 0) / 100;
-  welcomeAmountEl.textContent = `S$${fmt2(annualPremium * w)}`;
-  annualAmountEl.textContent = `S$${fmt2(annualPremium * a)}`;
+function bonusRowMarkup({ field, title, desc, checked, rate, amount }) {
+  return `
+    <div class="bonus-row" data-field="${field}">
+      <label class="bonus-check">
+        <input type="checkbox" data-bonus-toggle="${field}" ${checked ? 'checked' : ''}>
+        <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span>
+      </label>
+      <div class="meta">
+        <span class="ttl">${title}</span>
+        <span class="desc">${desc}</span>
+      </div>
+      <div class="rate-input">
+        <input type="number" data-bonus-rate="${field}" value="${(rate * 100).toFixed(1)}" step="0.1" min="0" max="100" inputmode="decimal">
+        <span class="suffix">%</span>
+      </div>
+      <div class="bonus-amount" data-bonus-amount="${field}">S$${fmt0(amount)}</div>
+    </div>
+  `;
 }
 
-// Mark rate inputs as user-touched so we don't clobber overrides on subsequent populates.
-[welcomeRateEl, annualRateEl].forEach(el => {
-  el.addEventListener('input', () => { el.dataset.touched = '1'; });
-});
+// Event delegation on the groups container — each card has the same control
+// shape, so we route by data-* attributes instead of attaching listeners
+// per-card. Survives re-renders without re-binding.
+bonusGroupsEl.addEventListener('change', onBonusControlChange);
+bonusGroupsEl.addEventListener('input', onBonusControlInput);
+
+function onBonusControlChange(e) {
+  const t = e.target;
+  if (!t.matches('input[data-bonus-toggle]')) return;
+  const card = t.closest('.bonus-group');
+  const state = groupState.get(card?.dataset.key);
+  if (!state) return;
+  if (t.dataset.bonusToggle === 'welcome') state.excludeWelcome = t.checked;
+  if (t.dataset.bonusToggle === 'annual') state.excludeAnnual = t.checked;
+  scheduleRerender();
+}
+
+function onBonusControlInput(e) {
+  const t = e.target;
+  if (!t.matches('input[data-bonus-rate]')) return;
+  const card = t.closest('.bonus-group');
+  const state = groupState.get(card?.dataset.key);
+  if (!state) return;
+  const rate = (parseFloat(t.value) || 0) / 100;
+  if (t.dataset.bonusRate === 'welcome') state.welcomeRate = rate;
+  if (t.dataset.bonusRate === 'annual') state.annualPremiumRate = rate;
+  state.touched = true;
+  // Refresh the dollar-amount label live as the user types.
+  const amountEl = card.querySelector(`[data-bonus-amount="${t.dataset.bonusRate}"]`);
+  if (amountEl) {
+    const policies = (computeBonusGroups().get(card.dataset.key) || { policies: [] }).policies;
+    const avgAnnual = policies.length
+      ? policies.reduce((s, raw) => s + annualPremiumFor(raw), 0) / policies.length
+      : 0;
+    amountEl.textContent = `S$${fmt0(avgAnnual * rate)}`;
+  }
+  scheduleRerender();
+}
 
 
 // ---------- Render orchestration ---------------------------------------------
 
-function currentBonusOptions() {
-  const opts = {
-    excludeWelcomeBonus: excludeWelcomeEl.checked,
-    excludeAnnualPremiumBonus: excludeAnnualEl.checked,
+function bonusOptionsForPolicy(raw) {
+  const state = groupState.get(groupKeyFor(raw));
+  if (!state) return {};
+  return {
+    excludeWelcomeBonus: state.excludeWelcome,
+    excludeAnnualPremiumBonus: state.excludeAnnual,
+    welcomeBonusRate: state.welcomeRate,
+    annualPremiumBonusRate: state.annualPremiumRate,
   };
-  const w = parseFloat(welcomeRateEl.value);
-  const a = parseFloat(annualRateEl.value);
-  if (!Number.isNaN(w)) opts.welcomeBonusRate = w / 100;
-  if (!Number.isNaN(a)) opts.annualPremiumBonusRate = a / 100;
-  return opts;
 }
 
 async function updateAllRendered({ trigger = 'rerender' } = {}) {
@@ -362,7 +488,7 @@ async function updateAllRendered({ trigger = 'rerender' } = {}) {
   for (const { item, raw } of policies) {
     setStatus(item, 'rendering');
     try {
-      const opts = currentBonusOptions();
+      const opts = bonusOptionsForPolicy(raw);
       const data = derive(raw, opts);
       const blob = await renderToPng(data);
       if (myToken !== renderToken) return;  // newer render started; new pass owns the toast
