@@ -40,16 +40,6 @@ const deltaCardEl = document.getElementById('delta-card');
 
 const renderToastEl = document.getElementById('render-toast');
 const renderToastMsgEl = renderToastEl?.querySelector('.msg');
-// Cycle through a few playful messages so a long batch (~20 policies) doesn't
-// just stare back with the same line for ten seconds. Picked once per
-// updateAllRendered run so the toast doesn't twitch.
-const RENDER_TOAST_MESSAGES = [
-  'Crunching the numbers',
-  'Polishing the IRR',
-  'Recomputing snapshots',
-  'Stirring in the bonus math',
-  'Re-rendering with feel',
-];
 
 // Phase 9F — keep the latest preview blob + meta so the Drive Save
 // button always saves the currently displayed report.
@@ -129,33 +119,60 @@ function scheduleRerender() {
   // Show the toast IMMEDIATELY (during the 90 ms debounce window) so the
   // user sees acknowledgement of their click before the actual render
   // starts. Otherwise a 20-policy re-render reads as silence.
-  showRenderToast(pickRenderToastMessage());
+  showLoadingToast();
   clearTimeout(rerenderTimer);
-  rerenderTimer = setTimeout(() => updateAllRendered().catch(console.error), 90);
+  rerenderTimer = setTimeout(
+    () => updateAllRendered({ trigger: 'rerender' }).catch(console.error),
+    90,
+  );
 }
 
-// ---------- Re-render toast --------------------------------------------------
+// ---------- Render toast -----------------------------------------------------
+//
+// One toast element with two states:
+//   loading  → spinner + "Updating snapshots… X / Y"
+//   success  → green check + "Successfully converted N PDFs → M Images"
+//                          (or "Updated M snapshot(s)" on re-render)
+// The success state auto-fades after a brief celebration window. A new
+// loading call before the fade kicks in cancels the auto-hide cleanly.
 
-function pickRenderToastMessage() {
-  return RENDER_TOAST_MESSAGES[Math.floor(Math.random() * RENDER_TOAST_MESSAGES.length)];
-}
+let _toastHideTimer = null;
 
-function showRenderToast(text, suffix) {
+function setToastState(state, message) {
   if (!renderToastEl) return;
-  if (renderToastMsgEl) {
-    renderToastMsgEl.textContent = suffix ? `${text} · ${suffix}` : text;
-  }
+  // Clear any pending auto-hide so a quick toggle-after-success doesn't
+  // accidentally hide the new loading toast mid-flight.
+  clearTimeout(_toastHideTimer);
+  _toastHideTimer = null;
+
+  renderToastEl.classList.remove('is-loading', 'is-success');
+  renderToastEl.classList.add(`is-${state}`);
+  if (renderToastMsgEl && message) renderToastMsgEl.textContent = message;
   renderToastEl.hidden = false;
   // RAF so the `display:none -> block` flip lands before the opacity transition
   requestAnimationFrame(() => renderToastEl.classList.add('show'));
 }
 
-let _toastHideTimer = null;
+function showLoadingToast(progressText) {
+  setToastState(
+    'loading',
+    progressText ? `Updating snapshots… ${progressText}` : 'Updating snapshots…'
+  );
+}
+
+function showSuccessToast(message, autoHideMs = 2600) {
+  setToastState('success', message);
+  _toastHideTimer = setTimeout(hideRenderToast, autoHideMs);
+}
+
 function hideRenderToast() {
   if (!renderToastEl) return;
-  renderToastEl.classList.remove('show');
   clearTimeout(_toastHideTimer);
-  _toastHideTimer = setTimeout(() => { renderToastEl.hidden = true; }, 220);
+  _toastHideTimer = null;
+  renderToastEl.classList.remove('show');
+  setTimeout(() => {
+    if (!renderToastEl.classList.contains('show')) renderToastEl.hidden = true;
+  }, 240);
 }
 [excludeWelcomeEl, excludeAnnualEl].forEach(el => el.addEventListener('change', scheduleRerender));
 [welcomeRateEl, annualRateEl].forEach(el => el.addEventListener('input', scheduleRerender));
@@ -238,7 +255,7 @@ async function processNewFiles() {
   }
 
   populateBonusPanelFromFirst();
-  await updateAllRendered();
+  await updateAllRendered({ trigger: 'parse' });
 }
 
 // Each policy across all parsed PDFs becomes its own render target. Used by
@@ -322,7 +339,7 @@ function currentBonusOptions() {
   return opts;
 }
 
-async function updateAllRendered() {
+async function updateAllRendered({ trigger = 'rerender' } = {}) {
   const myToken = ++renderToken;
   const policies = allParsedPolicies();
   if (!policies.length) {
@@ -331,10 +348,11 @@ async function updateAllRendered() {
     return;
   }
 
-  // Pick one playful headline per pass and update only the suffix as renders
-  // land — flipping the headline mid-batch reads as twitchy.
-  const headline = pickRenderToastMessage();
-  showRenderToast(headline, policies.length === 1 ? null : `0 / ${policies.length}`);
+  // Show the loading toast with progress straight away. Single-policy passes
+  // skip the "0 / 1" suffix to avoid noise — they're fast enough that the
+  // success state lands within the 600 ms minimum dwell.
+  showLoadingToast(policies.length > 1 ? `0 / ${policies.length}` : null);
+  const loadingShownAt = performance.now();
 
   // Render every policy across every uploaded PDF. A file row goes to "Done"
   // only after its last policy has rendered (or any policy fails).
@@ -364,7 +382,7 @@ async function updateAllRendered() {
     }
     renderedCount += 1;
     if (myToken === renderToken && policies.length > 1) {
-      showRenderToast(headline, `${renderedCount} / ${policies.length}`);
+      showLoadingToast(`${renderedCount} / ${policies.length}`);
     }
   }
   if (myToken !== renderToken) return;
@@ -433,10 +451,35 @@ async function updateAllRendered() {
 
   buildDeltaCard(first.raw, first.data);
   resultSection.hidden = false;
-  // Last non-preempted pass: tear the toast down. Earlier passes that got
-  // overtaken by a newer toggle bailed at `myToken !== renderToken` without
-  // touching the toast, so the newer pass naturally owns it through to here.
-  hideRenderToast();
+
+  // Last non-preempted pass: swap the toast into its success state and let
+  // it auto-fade. Earlier passes that got overtaken by a newer toggle bailed
+  // at `myToken !== renderToken` without touching the toast, so the newer
+  // pass naturally owns it through to here.
+  //
+  // Wording reflects the trigger:
+  //   parse    → "Successfully converted N PDFs → M Images"  (initial upload)
+  //   rerender → "Updated M snapshot(s)"                      (bonus toggle)
+  const nPdfs = countDistinctPdfs(successes);
+  const nImages = successes.length;
+  const successMsg = trigger === 'parse'
+    ? `Successfully converted ${nPdfs} PDF${nPdfs === 1 ? '' : 's'} → ${nImages} Image${nImages === 1 ? '' : 's'}`
+    : `Updated ${nImages} snapshot${nImages === 1 ? '' : 's'}`;
+
+  // Enforce a minimum dwell on the loading toast so very fast renders
+  // (≤200 ms) don't flash and disappear before the user registers them.
+  const minLoadingMs = 600;
+  const elapsed = performance.now() - loadingShownAt;
+  const wait = Math.max(0, minLoadingMs - elapsed);
+  setTimeout(() => {
+    if (myToken === renderToken) showSuccessToast(successMsg);
+  }, wait);
+}
+
+function countDistinctPdfs(successes) {
+  const seen = new Set();
+  for (const s of successes) seen.add(s.item);
+  return seen.size;
 }
 
 

@@ -232,11 +232,17 @@
 <!-- Hidden render stage: snapshot.js builds the 720px DOM here for capture -->
 <div id="render-stage" aria-hidden="true"></div>
 
-<!-- Floating toast that announces re-renders triggered by bonus toggles or
-     rate edits. The work is sequential and can take several seconds across
-     a 20-file batch, so silence reads as "nothing happened". -->
+<!-- Floating toast: announces re-renders triggered by bonus toggles, rate
+     edits, and initial parses. Two visual states sharing one element:
+       .is-loading -> spinner + "Updating snapshots… X / Y"
+       .is-success -> green check + "Successfully converted N PDFs → M Images"
+     Sequential render of a 20-file batch takes several seconds; without
+     this, silence reads as "nothing happened". -->
 <div id="render-toast" class="render-toast" role="status" aria-live="polite" hidden>
-  <span class="spinner" aria-hidden="true"></span>
+  <span class="icon spinner" aria-hidden="true"></span>
+  <svg class="icon check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <polyline points="20 6 9 17 4 12"/>
+  </svg>
   <span class="msg">Updating snapshot…</span>
 </div>
 
