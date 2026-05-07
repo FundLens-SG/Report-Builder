@@ -97,8 +97,35 @@ export function derive(raw, options = {}) {
   const gainsPct = Math.max(0, 100 - capitalPct);
   const lossPct = inLoss ? rawCapitalPct - 100 : 0;
 
-  const holdingsEnriched = enrichHoldings(raw.holdings, raw.accountValue);
-  const fundPnlTotal = holdingsEnriched.reduce((s, h) => s + h.pnlDollar, 0);
+  const allEnriched = enrichHoldings(raw.holdings, raw.accountValue);
+  // Manulife reports per-fund Total P&L as a CUMULATIVE figure that includes
+  // realised gains from switch-outs. So a fund the customer largely switched
+  // away from can show a tiny current Fund Value sitting next to a P&L
+  // figure many multiples larger — accurate per Manulife's accounting, but
+  // confusing in a one-page summary aimed at clients.
+  //
+  // Heuristic: a holding is "leftover" from a fund switch when both
+  //   - it's currently <0.5% of the account value, AND
+  //   - its absolute P&L is at least as large as its current value.
+  // We split such positions out into `minorHoldings`; the snapshot template
+  // hides them from the donut and the per-fund table and surfaces a compact
+  // footnote line so the visible rows tell a coherent story.
+  const isLeftoverSwitch = (h) =>
+    h.allocationPct < 0.5 && Math.abs(h.pnlDollar) > h.fundValue;
+  const holdingsEnriched = allEnriched.filter(h => !isLeftoverSwitch(h));
+  const minorHoldings = allEnriched.filter(isLeftoverSwitch);
+
+  // Re-color the visible holdings in their (now contiguous) order so the
+  // colours stay paired with the visual ranking on screen.
+  holdingsEnriched.forEach((h, i) => { h.color = COLORS[i % COLORS.length]; });
+
+  const minorHoldingsValue = minorHoldings.reduce((s, h) => s + h.fundValue, 0);
+  const minorHoldingsPnl = minorHoldings.reduce((s, h) => s + h.pnlDollar, 0);
+
+  // fundPnlTotal still includes minor positions — it must reconcile with
+  // Manulife's "Grand Total" P&L line, which sums every fund regardless of
+  // current size.
+  const fundPnlTotal = allEnriched.reduce((s, h) => s + h.pnlDollar, 0);
 
   // Estimate the market gain on the bonus units themselves.
   // Bonuses were credited as units in the funds at inception. Their growth
@@ -147,6 +174,9 @@ export function derive(raw, options = {}) {
     inLoss,
     lossPct: round1(lossPct),
     holdingsEnriched,
+    minorHoldings,
+    minorHoldingsValue,
+    minorHoldingsPnl,
     fundPnlTotal,
     equityPct: round1(equityPct),
     incomePct: round1(incomePct),

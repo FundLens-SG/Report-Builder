@@ -275,8 +275,21 @@ function holdingsTable(d) {
         </tr>
       </tbody>
     </table>
-    <p style="font-size: 10px; color: #888780; margin: 6px 0 0 0;">Fund-level P&amp;L sums to ${signMoney(d.fundPnlTotal)}. Policy-level P&amp;L of ${signMoney(d.totalPnlDollar)} also reflects reinvested dividends and unit-price movement at the policy layer.</p>
+    <p style="font-size: 10px; color: #888780; margin: 6px 0 0 0;">Fund-level P&amp;L sums to ${signMoney(d.fundPnlTotal)}. Policy-level P&amp;L of ${signMoney(d.totalPnlDollar)} also reflects reinvested dividends and unit-price movement at the policy layer.${minorHoldingsLine(d)}</p>
   </div>`;
+}
+
+function minorHoldingsLine(d) {
+  // Only surface the note when at least one switched-out leftover position
+  // exists, otherwise skip entirely. The exact count is useful (clients
+  // recognise "1 minor position" vs. "3 minor positions" intuitively).
+  if (!d.minorHoldings?.length) return '';
+  const n = d.minorHoldings.length;
+  const valueStr = `S$${fmt2(d.minorHoldingsValue)}`;
+  const pnlStr = d.minorHoldingsPnl < 0
+    ? `−S$${fmt2(Math.abs(d.minorHoldingsPnl))}`
+    : `+S$${fmt2(d.minorHoldingsPnl)}`;
+  return `<br>Plus ${n} minor position${n === 1 ? '' : 's'} (${valueStr} value, ${pnlStr} P&amp;L) from earlier fund switches — hidden for clarity.`;
 }
 
 function strategyFooter(d) {
