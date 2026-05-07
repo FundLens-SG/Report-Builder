@@ -842,6 +842,52 @@ body::after {
   z-index: -1;
 }
 
+/* ── Re-render toast ───────────────────────────────────────────── */
+.render-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  background: rgba(20, 20, 22, 0.96);
+  color: #f5f4ee;
+  padding: 10px 18px 10px 14px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.32),
+              0 2px 6px rgba(0, 0, 0, 0.18),
+              0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1000;
+  transition: opacity 200ms ease, transform 200ms ease;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, monospace);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+.render-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.render-toast .spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-top-color: #4ade80;  /* CKG green */
+  animation: render-toast-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes render-toast-spin { to { transform: rotate(360deg); } }
+body.is-light .render-toast {
+  background: rgba(20, 20, 22, 0.94);
+}
+
 /* File list visibility: the section heading lives elsewhere, so collapse
    the bare list to zero margin when nothing has been added. */
 .file-list:empty { display: none; }

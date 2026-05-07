@@ -38,6 +38,19 @@ const driveSaveLabel = document.getElementById('drive-save-label');
 const driveLoadBtn = document.getElementById('drive-load-btn');
 const deltaCardEl = document.getElementById('delta-card');
 
+const renderToastEl = document.getElementById('render-toast');
+const renderToastMsgEl = renderToastEl?.querySelector('.msg');
+// Cycle through a few playful messages so a long batch (~20 policies) doesn't
+// just stare back with the same line for ten seconds. Picked once per
+// updateAllRendered run so the toast doesn't twitch.
+const RENDER_TOAST_MESSAGES = [
+  'Crunching the numbers',
+  'Polishing the IRR',
+  'Recomputing snapshots',
+  'Stirring in the bonus math',
+  'Re-rendering with feel',
+];
+
 // Phase 9F — keep the latest preview blob + meta so the Drive Save
 // button always saves the currently displayed report.
 let lastPreviewBlob = null;
@@ -113,8 +126,36 @@ function scheduleRerender() {
     const target = recognised || firstParsed.raws[0];
     updateBonusAmounts(derive(target, {}).annualPremium);
   }
+  // Show the toast IMMEDIATELY (during the 90 ms debounce window) so the
+  // user sees acknowledgement of their click before the actual render
+  // starts. Otherwise a 20-policy re-render reads as silence.
+  showRenderToast(pickRenderToastMessage());
   clearTimeout(rerenderTimer);
   rerenderTimer = setTimeout(() => updateAllRendered().catch(console.error), 90);
+}
+
+// ---------- Re-render toast --------------------------------------------------
+
+function pickRenderToastMessage() {
+  return RENDER_TOAST_MESSAGES[Math.floor(Math.random() * RENDER_TOAST_MESSAGES.length)];
+}
+
+function showRenderToast(text, suffix) {
+  if (!renderToastEl) return;
+  if (renderToastMsgEl) {
+    renderToastMsgEl.textContent = suffix ? `${text} · ${suffix}` : text;
+  }
+  renderToastEl.hidden = false;
+  // RAF so the `display:none -> block` flip lands before the opacity transition
+  requestAnimationFrame(() => renderToastEl.classList.add('show'));
+}
+
+let _toastHideTimer = null;
+function hideRenderToast() {
+  if (!renderToastEl) return;
+  renderToastEl.classList.remove('show');
+  clearTimeout(_toastHideTimer);
+  _toastHideTimer = setTimeout(() => { renderToastEl.hidden = true; }, 220);
 }
 [excludeWelcomeEl, excludeAnnualEl].forEach(el => el.addEventListener('change', scheduleRerender));
 [welcomeRateEl, annualRateEl].forEach(el => el.addEventListener('input', scheduleRerender));
@@ -286,20 +327,27 @@ async function updateAllRendered() {
   const policies = allParsedPolicies();
   if (!policies.length) {
     resultSection.hidden = true;
+    hideRenderToast();
     return;
   }
+
+  // Pick one playful headline per pass and update only the suffix as renders
+  // land — flipping the headline mid-batch reads as twitchy.
+  const headline = pickRenderToastMessage();
+  showRenderToast(headline, policies.length === 1 ? null : `0 / ${policies.length}`);
 
   // Render every policy across every uploaded PDF. A file row goes to "Done"
   // only after its last policy has rendered (or any policy fails).
   const renderedByItem = new Map();  // queue item -> { ok: int, fail: int }
   const successes = [];
+  let renderedCount = 0;
   for (const { item, raw } of policies) {
     setStatus(item, 'rendering');
     try {
       const opts = currentBonusOptions();
       const data = derive(raw, opts);
       const blob = await renderToPng(data);
-      if (myToken !== renderToken) return;  // newer render started
+      if (myToken !== renderToken) return;  // newer render started; new pass owns the toast
       successes.push({ item, raw, blob, data });
       const tally = renderedByItem.get(item) || { ok: 0, fail: 0 };
       tally.ok += 1; renderedByItem.set(item, tally);
@@ -313,6 +361,10 @@ async function updateAllRendered() {
       const tally = renderedByItem.get(item) || { ok: 0, fail: 0 };
       tally.fail += 1; renderedByItem.set(item, tally);
       if (!item.error) item.error = err?.message ?? String(err);
+    }
+    renderedCount += 1;
+    if (myToken === renderToken && policies.length > 1) {
+      showRenderToast(headline, `${renderedCount} / ${policies.length}`);
     }
   }
   if (myToken !== renderToken) return;
@@ -381,6 +433,10 @@ async function updateAllRendered() {
 
   buildDeltaCard(first.raw, first.data);
   resultSection.hidden = false;
+  // Last non-preempted pass: tear the toast down. Earlier passes that got
+  // overtaken by a newer toggle bailed at `myToken !== renderToken` without
+  // touching the toast, so the newer pass naturally owns it through to here.
+  hideRenderToast();
 }
 
 
