@@ -319,6 +319,22 @@ function strategyFooter(d) {
         <p style="color: #5f5e5a; margin: 0; line-height: 1.5;">${fmtPct1(d.incomePct)}% in bonds and multi-asset for yield and stability.</p>
       </div>
     </div>
-    <p style="font-size: 10px; color: #888780; margin: 10px 0 0 0; padding-top: 8px; border-top: 0.5px solid rgba(0,0,0,0.08);">Risk profile: ${esc(d.riskProfile)} · CKA: ${esc(d.ckaStatus)} (expiry ${esc(d.ckaExpiryPretty)}) · Past performance is not indicative of future performance.${adjustmentNote}</p>
+    <p style="font-size: 10px; color: #888780; margin: 10px 0 0 0; padding-top: 8px; border-top: 0.5px solid rgba(0,0,0,0.08);">${footerMetaLine(d)}${adjustmentNote}</p>
   </div>`;
+}
+
+// Builds the bottom-of-card meta line. Each component (risk profile, CKA,
+// disclaimer) is appended only when the underlying field is non-empty so a
+// PDF that's missing the optional advisory fields doesn't render as
+// "Risk profile:  · CKA:  (expiry )".
+function footerMetaLine(d) {
+  const parts = [];
+  if (d.riskProfile) parts.push(`Risk profile: ${esc(d.riskProfile)}`);
+  if (d.ckaStatus) {
+    parts.push(d.ckaExpiryPretty
+      ? `CKA: ${esc(d.ckaStatus)} (expiry ${esc(d.ckaExpiryPretty)})`
+      : `CKA: ${esc(d.ckaStatus)}`);
+  }
+  parts.push('Past performance is not indicative of future performance.');
+  return parts.join(' · ');
 }

@@ -106,11 +106,15 @@ def _find_policy_blocks(pages_text: list[str]) -> list[tuple[int, int]]:
 # ---------- Customer-level fields (shared across all policies) --------------
 
 def _parse_customer_level(page1_text: str) -> dict:
+    # Customer name: handle parenthesised Chinese aliases ("TAN SAN SAN
+    # (CHEN SHANSHAN)"), hyphens, periods, commas. Greedy match anchored on
+    # the trailing " Manulife (Singapore)" terminator pulls the regex back
+    # to the last uppercase or `)` before the terminator.
     customer_name = _grab_first(
         page1_text,
         [
-            r"^([A-Z][A-Z ]+[A-Z])[ \t]+Manulife[ \t]*\(Singapore\)",
-            r"Manulife[ \t]*\(Singapore\)[ \t]+Pte\.[ \t]*Ltd\.[^\n]*\n[ \t]*([A-Z][A-Z ]{1,}[A-Z])[ \t]*\n",
+            r"^([A-Z][A-Z ()\-.,]*[A-Z)])[ \t]+Manulife[ \t]*\(Singapore\)",
+            r"Manulife[ \t]*\(Singapore\)[ \t]+Pte\.[ \t]*Ltd\.[^\n]*\n[ \t]*([A-Z][A-Z ()\-.,]*[A-Z)])[ \t]*\n",
         ],
         flags=re.MULTILINE,
     )
@@ -118,9 +122,12 @@ def _parse_customer_level(page1_text: str) -> dict:
         page1_text,
         r"Customer Total Policy Holdings\s*\(as of (\d{1,2} \w+ \d{4})\)",
     )
+    # Multi-word risk-profile values ("Moderately Aggressive", "Not Done")
+    # plus a fallback for the value-on-next-line layout.
     risk_profile = _grab_first(page1_text, [
-        r"Risk Profile Questionnaire[ \t]+(\w+)",
-        r"^(\w+)[ \t]+Total Investment Value\s*\n\s*Risk Profile Questionnaire",
+        r"Risk Profile Questionnaire[ \t]+([A-Za-z][A-Za-z ]*?)(?=[ \t]*\(Expiry|[ \t]*\n|$)",
+        r"^([A-Za-z][A-Za-z ]*?)[ \t]+Total Investment Value\s*\n\s*Risk Profile Questionnaire",
+        r"Risk Profile Questionnaire\s*\n[ \t]*([A-Za-z][A-Za-z ]+?)(?=[ \t]*\n)",
     ], flags=re.MULTILINE)
     cka_status = _grab_first(page1_text, [
         r"Customer Knowledge Assessment[ \t]+(\w+)[ \t]+Total Market Value",
@@ -131,12 +138,13 @@ def _parse_customer_level(page1_text: str) -> dict:
         r"Customer Knowledge Assessment[\s\S]*?\(Expiry date:\s+(\d{2}/\d{2}/\d{4})\)",
     )
 
+    # Only customer_name + report_date are TRULY required — without them we
+    # can't build the filename or header. Risk profile / CKA fields are
+    # footer-only metadata; the snapshot omits them gracefully when missing
+    # so we don't fail the whole parse over a cosmetic disclosure line.
     missing = [name for name, val in [
         ("customer_name", customer_name),
         ("report_date", report_date),
-        ("risk_profile", risk_profile),
-        ("cka_status", cka_status),
-        ("cka_expiry", cka_expiry),
     ] if not val]
     if missing:
         raise ValueError(f"Missing customer-level fields in PDF: {', '.join(missing)}")
@@ -144,9 +152,9 @@ def _parse_customer_level(page1_text: str) -> dict:
     return dict(
         customer_name=customer_name,
         report_date=report_date,
-        risk_profile=risk_profile,
-        cka_status=cka_status,
-        cka_expiry=cka_expiry,
+        risk_profile=(risk_profile or "").strip(),
+        cka_status=cka_status or "",
+        cka_expiry=cka_expiry or "",
     )
 
 

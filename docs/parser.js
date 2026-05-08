@@ -64,16 +64,28 @@ function findPolicyBlocks(pageTexts) {
 // ---------- Customer-level fields (shared across all policies) ---------------
 
 function parseCustomerLevel(page1Text) {
+  // Customer-name patterns. The character class is intentionally generous —
+  // Singaporean names regularly include a parenthesised Chinese alias
+  // ("TAN SAN SAN (CHEN SHANSHAN)"), hyphens, periods (initials), and
+  // commas. We greedy-match across the line and let the trailing
+  // [A-Z\)] anchor pull the regex back to the last uppercase character or
+  // closing paren before the required " Manulife (Singapore)" terminator,
+  // so the alias is preserved without engulfing whitespace into the name.
   const customerName = grabFirst(page1Text, [
-    /^([A-Z][A-Z ]+[A-Z])[ \t]+Manulife[ \t]*\(Singapore\)/m,
-    /Manulife[ \t]*\(Singapore\)[ \t]+Pte\.[ \t]*Ltd\.[^\n]*\n[ \t]*([A-Z][A-Z ]{1,}[A-Z])[ \t]*\n/,
+    /^([A-Z][A-Z ()\-.,]*[A-Z)])[ \t]+Manulife[ \t]*\(Singapore\)/m,
+    /Manulife[ \t]*\(Singapore\)[ \t]+Pte\.[ \t]*Ltd\.[^\n]*\n[ \t]*([A-Z][A-Z ()\-.,]*[A-Z)])[ \t]*\n/,
   ]);
   const reportDate = grabFirst(page1Text, [
     /Customer Total Policy Holdings\s*\(as of (\d{1,2} \w+ \d{4})\)/,
   ]);
+  // Risk profile values can be multi-word ("Moderately Aggressive", "Not
+  // Done", "Pending Review") — the original `\w+` only captured "Moderately"
+  // and missed the rest. We accept letters + spaces, lazily, stopping at
+  // the closing `(Expiry date: …)` paren or end of line.
   const riskProfile = grabFirst(page1Text, [
-    /Risk Profile Questionnaire[ \t]+(\w+)/,
-    /^(\w+)[ \t]+Total Investment Value\s*\n\s*Risk Profile Questionnaire/m,
+    /Risk Profile Questionnaire[ \t]+([A-Za-z][A-Za-z ]*?)(?=[ \t]*\(Expiry|[ \t]*\n|$)/,
+    /^([A-Za-z][A-Za-z ]*?)[ \t]+Total Investment Value\s*\n\s*Risk Profile Questionnaire/m,
+    /Risk Profile Questionnaire\s*\n[ \t]*([A-Za-z][A-Za-z ]+?)(?=[ \t]*\n)/,
   ]);
   const ckaStatus = grabFirst(page1Text, [
     /Customer Knowledge Assessment[ \t]+(\w+)[ \t]+Total Market Value/,
@@ -84,12 +96,24 @@ function parseCustomerLevel(page1Text) {
     /Customer Knowledge Assessment[\s\S]*?\(Expiry date:\s+(\d{2}\/\d{2}\/\d{4})\)/,
   ]);
 
-  const required = { customerName, reportDate, riskProfile, ckaStatus, ckaExpiry };
+  // Only customerName + reportDate are TRULY required — without them we
+  // can't build the filename or header. Everything else (riskProfile, CKA
+  // status, CKA expiry) is footer-only metadata that the snapshot can
+  // gracefully omit. Failing the parse for those just means a 20-PDF
+  // batch fails 18 PDFs because the bottom-of-card footnote can't render
+  // exactly as planned, which is the wrong tradeoff.
+  const required = { customerName, reportDate };
   const missing = Object.entries(required).filter(([, v]) => !v).map(([k]) => k);
   if (missing.length) {
     throw new Error(`Missing customer-level fields in PDF: ${missing.join(', ')}`);
   }
-  return required;
+  return {
+    customerName,
+    reportDate,
+    riskProfile: riskProfile ? riskProfile.trim() : '',
+    ckaStatus: ckaStatus || '',
+    ckaExpiry: ckaExpiry || '',
+  };
 }
 
 
