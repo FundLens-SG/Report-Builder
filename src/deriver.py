@@ -170,20 +170,56 @@ def _enrich_holdings(holdings: list[Holding], account_value: float) -> list[dict
 def shorten_fund_name(full: str) -> str:
     """Shorten verbose Manulife fund names for the per-fund table.
 
-    'Capital Group New Perspective Fund (LUX) Bh-SGD' -> 'Capital Group New Perspective'
-    'Schroder Asian Growth Fund SGD' -> 'Schroder Asian Growth'
-    'Neuberger Berman US MultiCap Opps SGD A Acc' -> 'Neuberger Berman US MultiCap'
-    'Neuberger Berman EM Debt Hard Currency SGD A MD' -> 'Neuberger Berman EM Debt'
-    'Manulife Global Fund - Global Multi-Asset Diversified Income Fund AA (SGD Hedged) MDIST (G)'
-        -> 'Manulife Global Multi-Asset'
+    Examples:
+        'Capital Group New Perspective Fund (LUX) Bh-SGD' -> 'Capital Group New Perspective'
+        'Schroder Asian Growth Fund SGD'                   -> 'Schroder Asian Growth'
+        'Neuberger Berman US MultiCap Opps SGD A Acc'      -> 'Neuberger Berman US MultiCap'
+        'Neuberger Berman EM Debt Hard Currency SGD A MD'  -> 'Neuberger Berman EM Debt'
+        'Manulife Global Fund - Global Multi-Asset Diversified Income Fund AA (SGD Hedged) MDIST (G)'
+            -> 'Manulife Global Multi-Asset'
+        'Manulife Global Fund - Healthcare Fund AA SGD H ACC'
+            -> 'Manulife Global Healthcare'
+        'Manulife Global Fund - Preferred Securities Inc AA (SGD H) MDIST (G)'
+            -> 'Manulife Global Preferred Securities'
+        'Allianz Income and Growth AMi3 (H2-SGD)'          -> 'Allianz Income and Growth'
+        'Amova Investment Funds - Amova Singapore Dividend Equity Fund SGD'
+            -> 'Amova Singapore Dividend Equity'
     """
     s = full.strip()
-    s = re.sub(r"^Manulife Global Fund\s*-\s*Global\s+", "Manulife Global ", s, flags=re.IGNORECASE)
-    s = re.sub(r"\s+Fund\s*[-(].*$", "", s)
-    s = re.sub(r"\s+Fund\s+[A-Z]{1,3}(?:\s+\w+)*.*$", "", s)
-    s = re.sub(r"\s+Fund\s+SGD$", "", s, flags=re.IGNORECASE)
-    s = re.sub(r"\s+Fund$", "", s, flags=re.IGNORECASE)
-    s = re.sub(r"\s+Opps?\s+SGD.*$", "", s, flags=re.IGNORECASE)
-    s = re.sub(r"\s+Hard Currency SGD.*$", "", s, flags=re.IGNORECASE)
-    s = re.sub(r"\s+Diversifi?ed Income.*$", "", s, flags=re.IGNORECASE)
+
+    # Re-fuse PDF.js word-level splits like "Bh- SGD" / "Multi- Asset" but
+    # NOT separator dashes ("Fund - Global"). Compound splits have the dash
+    # glued to the preceding token (no space before).
+    s = re.sub(r"(\S[\/\-])\s+(\S)", r"\1\2", s)
+
+    # "Manulife Global Fund - X" → "Manulife Global X". Then collapse the
+    # accidental "Manulife Global Global …" double when X started with
+    # "Global" (e.g. "Manulife Global Fund - Global Multi-Asset").
+    s = re.sub(r"^Manulife Global Fund\s*-\s*", "Manulife Global ", s, flags=re.IGNORECASE)
+    s = re.sub(r"^Manulife Global Global\s+", "Manulife Global ", s, flags=re.IGNORECASE)
+
+    # "Amova Investment Funds - Amova X" → "Amova X"
+    s = re.sub(r"^Amova Investment Funds\s*-\s*Amova\s+", "Amova ", s, flags=re.IGNORECASE)
+
+    # Strip trailing share-class / hedge / distribution noise. Each pattern
+    # below matches the FIRST occurrence of a stop signature and trims from
+    # that point to end of string. Order matters — most-specific first.
+    stop_patterns = [
+        r"\s+Diversifi?ed Income.*$",
+        r"\s+AMi\d*\s*\(.*$",
+        r"\s+Opps?\s+SGD\b.*$",
+        r"\s+Hard Currency\s+SGD\b.*$",
+        r"\s+Inc\s+AA\b.*$",
+        r"\s+Fund\s+(?:AA?|Bh?|H2?|D|G|A2|B2)\b.*$",
+        r"\s+Fund\s+(?:SGD|USD|EUR|HKD|JPY|CNY|GBP|AUD)\b.*$",
+        r"\s+Fund\s+Hedged\b.*$",
+        r"\s+Fund\s*\(.*$",
+        r"\s+Fund$",
+        r"\s+\(LUX\).*$",
+        r"\s+(?:AA?|Bh-?|H2?-?)\s+\(.*$",
+        r"\s+AA?\s+(?:SGD|USD|EUR|HKD|JPY|CNY)\b.*$",
+        r"\s+SGD\s+(?:Hedged|H)\b.*$",
+    ]
+    for pat in stop_patterns:
+        s = re.sub(pat, "", s, flags=re.IGNORECASE)
     return s.strip()

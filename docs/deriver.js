@@ -238,17 +238,67 @@ function enrichHoldings(holdings, accountValue) {
 
 export function shortenFundName(full) {
   let s = (full || '').trim();
-  // PDF.js may have left a stray space inside compound words like "Bh- SGD"
-  // or "Multi- Asset" because it tokenizes word-by-word. Re-fuse them.
-  s = s.replace(/([\/\-])\s+/g, '$1');
-  s = s.replace(/^Manulife Global Fund\s*-\s*Global\s+/i, 'Manulife Global ');
-  s = s.replace(/\s+Fund\s*[-(].*$/, '');
-  s = s.replace(/\s+Fund\s+[A-Z]{1,3}(?:\s+\w+)*.*$/, '');
-  s = s.replace(/\s+Fund\s+SGD$/i, '');
-  s = s.replace(/\s+Fund$/i, '');
-  s = s.replace(/\s+Opps?\s+SGD.*$/i, '');
-  s = s.replace(/\s+Hard Currency SGD.*$/i, '');
-  s = s.replace(/\s+Diversifi?ed Income.*$/i, '');
+
+  // 1) Re-fuse PDF.js word-level splits like "Bh- SGD" / "H2- SGD" / "Multi-
+  //    Asset" that look like split tokens. We ONLY collapse when the
+  //    hyphen/slash is glued to the preceding token (no space before it) —
+  //    that's the PDF.js artefact signature. Real separator dashes such as
+  //    "Fund - Global" have spaces on BOTH sides and stay intact, so the
+  //    "Manulife Global Fund - <SpecificFund>" structure is preserved for
+  //    later rules to act on.
+  s = s.replace(/(\S[\/\-])\s+(\S)/g, '$1$2');
+
+  // 2) "Manulife Global Fund - X" → "Manulife Global X". Then collapse the
+  //    accidental "Manulife Global Global …" double when X happened to start
+  //    with "Global" (e.g. "Manulife Global Fund - Global Multi-Asset …").
+  s = s.replace(/^Manulife Global Fund\s*-\s*/i, 'Manulife Global ');
+  s = s.replace(/^Manulife Global Global\s+/i, 'Manulife Global ');
+
+  // 3) "Amova Investment Funds - Amova X" → "Amova X" (drop the
+  //    boilerplate prefix; "Amova Singapore Dividend Equity" reads cleaner
+  //    than "Amova Investment Funds - Amova Singapore Dividend Equity").
+  s = s.replace(/^Amova Investment Funds\s*-\s*Amova\s+/i, 'Amova ');
+
+  // 4) Trim trailing share-class / hedge / distribution / accumulator
+  //    fluff. Each pattern matches the FIRST occurrence of a stop signature
+  //    (in increasing aggressiveness) and strips everything from there to
+  //    end of string.
+  const STOP_PATTERNS = [
+    // "Diversified Income …" — verbose marketing tail; drop it specifically
+    // so "Manulife Global Multi-Asset Diversified Income Fund AA …" reads
+    // as "Manulife Global Multi-Asset".
+    /\s+Diversifi?ed Income.*$/i,
+    // "AMi3 (…)", "AMi5 (…)", "AMi (…)" — Allianz share-class designator
+    // followed by parens. The trailing digit varies across share classes,
+    // hence \d* rather than the previous overly-narrow [12]?.
+    /\s+AMi\d*\s*\(.*$/i,
+    // "Opps SGD A Acc" — Neuberger Berman's MultiCap Opportunities tail
+    /\s+Opps?\s+SGD\b.*$/i,
+    // "Hard Currency SGD A MD" — Neuberger Berman's EM Debt tail
+    /\s+Hard Currency\s+SGD\b.*$/i,
+    // "Inc AA (SGD H) MDIST (G)" — distribution/income share class
+    /\s+Inc\s+AA\b.*$/i,
+    // "Fund AA SGD H ACC" / "Fund A Acc" / "Fund A2 SGD H" / "Fund D" / "Fund G"
+    /\s+Fund\s+(?:AA?|Bh?|H2?|D|G|A2|B2)\b.*$/i,
+    // "Fund SGD" / "Fund SGD Hedged" / "Fund USD …"
+    /\s+Fund\s+(?:SGD|USD|EUR|HKD|JPY|CNY|GBP|AUD)\b.*$/i,
+    // "Fund Hedged …"
+    /\s+Fund\s+Hedged\b.*$/i,
+    // "Fund (LUX) Bh-SGD …" / "Fund (Lux)…"
+    /\s+Fund\s*\(.*$/i,
+    // Bare trailing "Fund"
+    /\s+Fund$/i,
+    // "(LUX) Bh-SGD" leftover when "Fund" was already trimmed elsewhere
+    /\s+\(LUX\).*$/i,
+    // "AA (SGD Hedged)" / "AA SGD H ACC" / "Bh-SGD" — share class then currency
+    /\s+(?:AA?|Bh-?|H2?-?)\s+\(.*$/i,
+    /\s+(?:AA?)\s+(?:SGD|USD|EUR|HKD|JPY|CNY)\b.*$/i,
+    // Bare "SGD Hedged" or "SGD H …" when nothing else matched
+    /\s+SGD\s+(?:Hedged|H)\b.*$/i,
+  ];
+  for (const re of STOP_PATTERNS) {
+    s = s.replace(re, '');
+  }
   return s.trim();
 }
 
