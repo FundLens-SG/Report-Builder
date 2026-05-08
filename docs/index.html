@@ -243,6 +243,26 @@
 <!-- Hidden render stage: snapshot.js builds the 720px DOM here for capture -->
 <div id="render-stage" aria-hidden="true"></div>
 
+<!-- Click-to-expand lightbox. Triggered by clicking the main preview image
+     or any thumbnail in the carousel. Prev/next buttons + Esc + click-
+     outside close it. Sync'd to currentPreviewIndex so the rest of the UI
+     (download button, delta card) stays in lockstep. -->
+<div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-labelledby="lightbox-caption" hidden>
+  <button class="lightbox-close" id="lightbox-close" type="button" aria-label="Close">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  </button>
+  <button class="lightbox-nav prev" id="lightbox-prev" type="button" aria-label="Previous snapshot">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <button class="lightbox-nav next" id="lightbox-next" type="button" aria-label="Next snapshot">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+  </button>
+  <figure class="lightbox-figure">
+    <img id="lightbox-img" alt="">
+    <figcaption id="lightbox-caption" class="lightbox-caption">—</figcaption>
+  </figure>
+</div>
+
 <!-- Floating toast: announces re-renders triggered by bonus toggles, rate
      edits, and initial parses. Two visual states sharing one element:
        .is-loading -> spinner + "Updating snapshots… X / Y"

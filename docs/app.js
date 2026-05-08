@@ -728,6 +728,12 @@ function setCurrentPreview(index) {
 
   // Delta card reflects the SELECTED snapshot, not always the first.
   buildDeltaCard(s.raw, s.data);
+
+  // If the lightbox is currently open, update its image + caption so the
+  // user can flip through full-size views with prev/next or arrow keys
+  // without ever closing it. Hoisted via syncLightbox(), which no-ops when
+  // the modal isn't open.
+  syncLightbox();
 }
 
 function renderCarousel() {
@@ -758,9 +764,101 @@ function renderCarousel() {
 prevPreviewBtn.addEventListener('click', () => setCurrentPreview(currentPreviewIndex - 1));
 nextPreviewBtn.addEventListener('click', () => setCurrentPreview(currentPreviewIndex + 1));
 
+
+// ---------- Click-to-expand lightbox ----------------------------------------
+//
+// Reuses currentPreviewIndex / currentSuccesses, so the lightbox is just a
+// big window onto the same selection state. Opens from the main preview img
+// or any thumbnail; closes via the × button, click-outside, or Esc.
+
+const lightboxEl = document.getElementById('lightbox');
+const lightboxImg = document.getElementById('lightbox-img');
+const lightboxCaptionEl = document.getElementById('lightbox-caption');
+const lightboxCloseBtn = document.getElementById('lightbox-close');
+const lightboxPrevBtn = document.getElementById('lightbox-prev');
+const lightboxNextBtn = document.getElementById('lightbox-next');
+
+function isLightboxOpen() {
+  return lightboxEl && !lightboxEl.hidden;
+}
+
+// Always updates the DOM, regardless of whether the modal is currently
+// visible — the modal content stays valid so opening is just un-hiding.
+function syncLightbox() {
+  const s = currentSuccesses[currentPreviewIndex];
+  if (!s) return;
+  lightboxImg.src = s.url;
+  lightboxImg.alt = `Snapshot ${currentPreviewIndex + 1} of ${currentSuccesses.length}`;
+  const counter = currentSuccesses.length > 1
+    ? `${currentPreviewIndex + 1} of ${currentSuccesses.length}`
+    : '';
+  lightboxCaptionEl.textContent = counter ? `${s.filename} · ${counter}` : s.filename;
+  lightboxPrevBtn.disabled = currentPreviewIndex === 0;
+  lightboxNextBtn.disabled = currentPreviewIndex === currentSuccesses.length - 1;
+  // Single-snapshot uploads: hide nav buttons entirely instead of just
+  // disabling them — there's nothing to navigate to.
+  lightboxPrevBtn.style.display = currentSuccesses.length > 1 ? '' : 'none';
+  lightboxNextBtn.style.display = currentSuccesses.length > 1 ? '' : 'none';
+}
+
+function openLightbox(index) {
+  if (!currentSuccesses.length) return;
+  if (typeof index === 'number') setCurrentPreview(index);
+  syncLightbox();
+  if (lightboxEl.hidden) {
+    lightboxEl.hidden = false;
+    requestAnimationFrame(() => lightboxEl.classList.add('show'));
+    document.body.style.overflow = 'hidden';  // suppress page scroll behind modal
+  }
+}
+
+function closeLightbox() {
+  if (lightboxEl.hidden) return;
+  lightboxEl.classList.remove('show');
+  document.body.style.overflow = '';
+  setTimeout(() => {
+    if (!lightboxEl.classList.contains('show')) lightboxEl.hidden = true;
+  }, 240);
+}
+
+// Open from main preview image.
+previewImg.addEventListener('click', () => openLightbox());
+
+// Open from any thumbnail. Delegated so it survives carousel re-renders;
+// we do NOT call setCurrentPreview here directly — renderCarousel's own
+// click handler already does that, and openLightbox(undefined) just opens
+// at whatever index is current after that click handler ran.
+carouselStripEl.addEventListener('click', (e) => {
+  const thumb = e.target.closest('.carousel-thumb');
+  if (!thumb) return;
+  // Defer one tick so the existing thumb click handler runs first and
+  // updates currentPreviewIndex via setCurrentPreview.
+  setTimeout(() => openLightbox(), 0);
+});
+
+// Close affordances.
+lightboxCloseBtn.addEventListener('click', closeLightbox);
+lightboxEl.addEventListener('click', (e) => {
+  // Click on the dimmed backdrop (not on a control or the image) → close.
+  if (e.target === lightboxEl) closeLightbox();
+});
+// Clicking the image itself closes too — feels more natural than a tiny ×.
+lightboxImg.addEventListener('click', closeLightbox);
+
+// Lightbox-internal prev/next.
+lightboxPrevBtn.addEventListener('click', () => setCurrentPreview(currentPreviewIndex - 1));
+lightboxNextBtn.addEventListener('click', () => setCurrentPreview(currentPreviewIndex + 1));
+
+
 // Keyboard arrows navigate the carousel — except when the user is typing in
-// an input/textarea (don't fight the browser's caret movement).
+// an input/textarea (don't fight the browser's caret movement). Esc closes
+// the lightbox if it's open.
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && isLightboxOpen()) {
+    e.preventDefault();
+    closeLightbox();
+    return;
+  }
   if (currentSuccesses.length < 2) return;
   if (e.target.matches('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
   if (e.key === 'ArrowLeft') {

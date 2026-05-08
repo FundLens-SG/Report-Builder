@@ -1087,6 +1087,135 @@ body::after {
   color: var(--ink);
 }
 
+/* ── Click-to-expand lightbox ──────────────────────────────────── */
+/* Hint that the main preview + thumbnails are clickable to enlarge. */
+.preview-frame img,
+.carousel-thumb img {
+  cursor: zoom-in;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(8, 8, 10, 0.92);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+/* The `hidden` HTML attribute defaults to display:none, but our `display:
+   flex` above wins specificity-wise — explicitly re-hide it. Without this,
+   the element still occupies the layer and hit-testing leaks through to
+   the rest of the page. */
+.lightbox[hidden] {
+  display: none;
+}
+.lightbox.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+.lightbox-figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  max-height: 100%;
+  /* Block click-bubble so clicking on the image itself doesn't close. */
+  pointer-events: auto;
+}
+.lightbox-figure img {
+  display: block;
+  max-width: min(820px, calc(100vw - 96px));
+  max-height: calc(100vh - 120px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow:
+    0 32px 90px rgba(0, 0, 0, 0.6),
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+  cursor: zoom-out;
+  transform: scale(0.985);
+  transition: transform 220ms ease;
+}
+.lightbox.show .lightbox-figure img {
+  transform: scale(1);
+}
+.lightbox-caption {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.62);
+  text-align: center;
+  margin: 0;
+  max-width: 80vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Floating controls — position relative to the viewport, not the figure,
+   so they stay in fixed corners regardless of image aspect ratio. */
+.lightbox-close {
+  position: absolute;
+  top: 22px;
+  right: 26px;
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: #f5f4ee;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+.lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.lightbox-close svg { width: 18px; height: 18px; }
+
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  color: #f5f4ee;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, opacity 160ms ease;
+}
+.lightbox-nav:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+.lightbox-nav:disabled {
+  opacity: 0.28;
+  cursor: not-allowed;
+}
+.lightbox-nav.prev { left: 26px; }
+.lightbox-nav.next { right: 26px; }
+.lightbox-nav svg { width: 22px; height: 22px; }
+
 /* ── State containers (hidden/shown via JS) ────────────────────── */
 [data-state-show]:not(.is-active) { display: none !important; }
 
