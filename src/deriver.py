@@ -201,25 +201,37 @@ def shorten_fund_name(full: str) -> str:
     # "Amova Investment Funds - Amova X" → "Amova X"
     s = re.sub(r"^Amova Investment Funds\s*-\s*Amova\s+", "Amova ", s, flags=re.IGNORECASE)
 
-    # Strip trailing share-class / hedge / distribution noise. Each pattern
-    # below matches the FIRST occurrence of a stop signature and trims from
-    # that point to end of string. Order matters — most-specific first.
-    stop_patterns = [
-        r"\s+Diversifi?ed Income.*$",
-        r"\s+AMi\d*\s*\(.*$",
-        r"\s+Opps?\s+SGD\b.*$",
-        r"\s+Hard Currency\s+SGD\b.*$",
-        r"\s+Inc\s+AA\b.*$",
-        r"\s+Fund\s+(?:AA?|Bh?|H2?|D|G|A2|B2)\b.*$",
-        r"\s+Fund\s+(?:SGD|USD|EUR|HKD|JPY|CNY|GBP|AUD)\b.*$",
-        r"\s+Fund\s+Hedged\b.*$",
-        r"\s+Fund\s*\(.*$",
-        r"\s+Fund$",
-        r"\s+\(LUX\).*$",
-        r"\s+(?:AA?|Bh-?|H2?-?)\s+\(.*$",
-        r"\s+AA?\s+(?:SGD|USD|EUR|HKD|JPY|CNY)\b.*$",
-        r"\s+SGD\s+(?:Hedged|H)\b.*$",
-    ]
-    for pat in stop_patterns:
-        s = re.sub(pat, "", s, flags=re.IGNORECASE)
+    # Strip from the FIRST share-class marker to end of string. Descriptive
+    # words (Hard Currency, Diversified Income, Opps, Healthcare, Preferred
+    # Securities …) sit BEFORE the share-class block, so anchoring on the
+    # share-class token keeps them intact. Tokens we recognise:
+    #   Allianz suffix:      AMi3, AMi5 (\d*)
+    #   Letter classes:      A, AA, A2, B, B2, Bh (with optional -CCY)
+    #   Hedge markers:       H, H2 (with optional -CCY)
+    #   Distribution codes:  MDIST, MInc, MD, Acc
+    #   Standalone Hedged:   Hedged
+    #   Currency codes:      SGD, USD, EUR, HKD, JPY, CNY, GBP, AUD
+    #   Inc as share class:  only before AA / AMi / paren (so the WORD
+    #                        'Income' stays intact)
+    #   Parenthesised codes: (LUX), (SGD), (SGD Hedged), (SGD H), (G), …
+    wordlike = (
+        r"AMi\d*"
+        r"|AA?[12]?(?:-[A-Z]{3})?"
+        r"|B[12h]?(?:-[A-Z]{3})?"
+        r"|H[12]?(?:-[A-Z]{3})?"
+        r"|MDIST|MInc|MD|Acc"
+        r"|Hedged"
+        r"|(?:SGD|USD|EUR|HKD|JPY|CNY|GBP|AUD)"
+        r"|Inc(?=\s+(?:AA?[12]?|AMi)|\s*\()"
+    )
+    parens = r"\([A-Z0-9][^)]*\)"
+    share_class_tail = re.compile(
+        rf"\s+(?:(?:{wordlike})\b|{parens}).*$",
+        re.IGNORECASE,
+    )
+    s = share_class_tail.sub("", s)
+
+    # Trailing " Fund" is mostly redundant in display.
+    s = re.sub(r"\s+Fund$", "", s, flags=re.IGNORECASE)
+
     return s.strip()

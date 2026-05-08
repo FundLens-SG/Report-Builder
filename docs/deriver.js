@@ -259,46 +259,53 @@ export function shortenFundName(full) {
   //    than "Amova Investment Funds - Amova Singapore Dividend Equity").
   s = s.replace(/^Amova Investment Funds\s*-\s*Amova\s+/i, 'Amova ');
 
-  // 4) Trim trailing share-class / hedge / distribution / accumulator
-  //    fluff. Each pattern matches the FIRST occurrence of a stop signature
-  //    (in increasing aggressiveness) and strips everything from there to
-  //    end of string.
-  const STOP_PATTERNS = [
-    // "Diversified Income …" — verbose marketing tail; drop it specifically
-    // so "Manulife Global Multi-Asset Diversified Income Fund AA …" reads
-    // as "Manulife Global Multi-Asset".
-    /\s+Diversifi?ed Income.*$/i,
-    // "AMi3 (…)", "AMi5 (…)", "AMi (…)" — Allianz share-class designator
-    // followed by parens. The trailing digit varies across share classes,
-    // hence \d* rather than the previous overly-narrow [12]?.
-    /\s+AMi\d*\s*\(.*$/i,
-    // "Opps SGD A Acc" — Neuberger Berman's MultiCap Opportunities tail
-    /\s+Opps?\s+SGD\b.*$/i,
-    // "Hard Currency SGD A MD" — Neuberger Berman's EM Debt tail
-    /\s+Hard Currency\s+SGD\b.*$/i,
-    // "Inc AA (SGD H) MDIST (G)" — distribution/income share class
-    /\s+Inc\s+AA\b.*$/i,
-    // "Fund AA SGD H ACC" / "Fund A Acc" / "Fund A2 SGD H" / "Fund D" / "Fund G"
-    /\s+Fund\s+(?:AA?|Bh?|H2?|D|G|A2|B2)\b.*$/i,
-    // "Fund SGD" / "Fund SGD Hedged" / "Fund USD …"
-    /\s+Fund\s+(?:SGD|USD|EUR|HKD|JPY|CNY|GBP|AUD)\b.*$/i,
-    // "Fund Hedged …"
-    /\s+Fund\s+Hedged\b.*$/i,
-    // "Fund (LUX) Bh-SGD …" / "Fund (Lux)…"
-    /\s+Fund\s*\(.*$/i,
-    // Bare trailing "Fund"
-    /\s+Fund$/i,
-    // "(LUX) Bh-SGD" leftover when "Fund" was already trimmed elsewhere
-    /\s+\(LUX\).*$/i,
-    // "AA (SGD Hedged)" / "AA SGD H ACC" / "Bh-SGD" — share class then currency
-    /\s+(?:AA?|Bh-?|H2?-?)\s+\(.*$/i,
-    /\s+(?:AA?)\s+(?:SGD|USD|EUR|HKD|JPY|CNY)\b.*$/i,
-    // Bare "SGD Hedged" or "SGD H …" when nothing else matched
-    /\s+SGD\s+(?:Hedged|H)\b.*$/i,
-  ];
-  for (const re of STOP_PATTERNS) {
-    s = s.replace(re, '');
-  }
+  // 4) Strip from the FIRST share-class marker to end of string. Descriptive
+  //    words (Hard Currency, Diversified Income, Opps, Healthcare, Preferred
+  //    Securities …) sit BEFORE the share-class block, so anchoring on the
+  //    share-class token keeps them intact instead of getting cut off.
+  //    Tokens we recognise as share-class boundaries:
+  //
+  //      Allianz suffix:      AMi3, AMi5, AMi9 (\d*)
+  //      Letter classes:      A, AA, A2, B, B2, Bh (with optional -CCY)
+  //      Hedge markers:       H, H2 (with optional -CCY)
+  //      Distribution codes:  MDIST, MInc, MD, Acc, ACC
+  //      Standalone Hedged:   Hedged
+  //      Currency codes:      SGD, USD, EUR, HKD, JPY, CNY, GBP, AUD
+  //      Inc as share class:  only when followed by AA / AMi / paren so the
+  //                           word "Income" (e.g. "Allianz Income and
+  //                           Growth …") is left alone.
+  //      Parenthesised codes: (LUX), (SGD), (SGD Hedged), (SGD H), (G), …
+  // The wordlike tokens need a trailing \b so we don't accidentally chop
+  // inside a longer identifier ("Acc" inside "Accumulator", say). The
+  // parenthesised alternative ends with `)` — a non-word char with another
+  // non-word char (space) after, so \b doesn't fire there. Splitting the
+  // alternation lets each branch use the right anchor.
+  const WORDLIKE = (
+    // Allianz must come before bare A/AA so "AMi3" wins
+    'AMi\\d*'
+    + '|AA?[12]?(?:-[A-Z]{3})?'
+    + '|B[12h]?(?:-[A-Z]{3})?'
+    + '|H[12]?(?:-[A-Z]{3})?'
+    + '|MDIST|MInc|MD|Acc'
+    + '|Hedged'
+    + '|(?:SGD|USD|EUR|HKD|JPY|CNY|GBP|AUD)'
+    // Inc as share-class — ONLY before AA / AMi / paren so the WORD
+    // "Income" (e.g. "Allianz Income and Growth") stays intact.
+    + '|Inc(?=\\s+(?:AA?[12]?|AMi)|\\s*\\()'
+  );
+  // Parenthesised codes — (LUX), (SGD), (SGD Hedged), (SGD H), (G), (H2-SGD), …
+  const PARENS = '\\([A-Z0-9][^)]*\\)';
+  const SHARE_CLASS_TAIL = new RegExp(
+    `\\s+(?:(?:${WORDLIKE})\\b|${PARENS}).*$`,
+    'i',
+  );
+  s = s.replace(SHARE_CLASS_TAIL, '');
+
+  // 5) Trailing " Fund" is mostly redundant in display ("Capital Group
+  //    New Perspective" reads as well as "Capital Group New Perspective
+  //    Fund" and is shorter). Drop it when nothing meaningful followed.
+  s = s.replace(/\s+Fund$/i, '');
+
   return s.trim();
 }
 
