@@ -73,6 +73,16 @@ export const PRODUCTS = {
         ],
         annualPremium: 0.050,
       },
+      // 20 Years Flexi 10 — confirmed by user. Same welcome tiering as
+      // InvestReady Growth 20Y Flexi 10 (30% / 60%) but a higher annual
+      // premium bonus rate (5% vs Growth's 3%).
+      '20 Years Flexi 10': {
+        welcomeTiers: [
+          { min: 2400, max: 9599.99, rate: 0.300 },
+          { min: 9600, max: Infinity, rate: 0.600 },
+        ],
+        annualPremium: 0.050,
+      },
     },
   },
 };

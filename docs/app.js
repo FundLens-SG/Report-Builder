@@ -373,24 +373,30 @@ excludeAnnualEl.addEventListener('change', () => {
 });
 
 function refreshBonusTotals() {
-  // Show the total welcome / annual bonus dollars across all uploaded
-  // policies — informational, doesn't depend on the checkbox state. Helps
-  // the user see what's at stake before they tick.
+  // Right-side hint on each toggle row. Counts how many of the uploaded
+  // policies actually carry a published bonus rate for that bonus type;
+  // those are the policies the toggle has any effect on. MANUAL / 0%-rate
+  // policies aren't "bonusable" so we surface that explicitly.
   const policies = allParsedPolicies();
   if (!policies.length) {
     welcomeTotalEl.textContent = '—';
     annualTotalEl.textContent = '—';
     return;
   }
-  let welcomeSum = 0, annualSum = 0;
+  let welcomable = 0, annualable = 0;
   for (const { raw } of policies) {
-    const ap = annualPremiumFor(raw);
-    const auto = lookupBonusRates(raw.product, raw.variation, ap);
-    welcomeSum += ap * (auto.welcomeRate || 0);
-    annualSum += ap * (auto.annualPremiumRate || 0);
+    const auto = lookupBonusRates(raw.product, raw.variation, annualPremiumFor(raw));
+    if ((auto.welcomeRate || 0) > 0) welcomable += 1;
+    if ((auto.annualPremiumRate || 0) > 0) annualable += 1;
   }
-  welcomeTotalEl.textContent = `S$${fmt0(welcomeSum)} total`;
-  annualTotalEl.textContent = `S$${fmt0(annualSum)} total`;
+  welcomeTotalEl.textContent = describeApplied(welcomable, policies.length);
+  annualTotalEl.textContent = describeApplied(annualable, policies.length);
+}
+
+function describeApplied(eligible, total) {
+  if (eligible === 0) return 'no eligible policies';
+  if (eligible === total) return `applied to all ${total} polic${total === 1 ? 'y' : 'ies'}`;
+  return `applied to ${eligible} of ${total} polic${total === 1 ? 'y' : 'ies'}`;
 }
 
 function renderBonusGroups() {
