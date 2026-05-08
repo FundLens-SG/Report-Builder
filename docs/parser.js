@@ -281,17 +281,41 @@ function clusterIntoRows(items) {
   return rows.map(mergeSplitNumbers);
 }
 
-// PDF.js sometimes emits "13,737.79" as two adjacent text items: "13,737"
-// then ".79". Glue them back together when the gap is small.
+// PDF.js sometimes splits long numbers across adjacent text items. Two
+// patterns we've observed in real Manulife reports:
+//
+//   "13,737" + ".79"          decimal-fragment split   (NEMD pol 1)
+//   "187"   + ",200.00"       comma-group split         (MGMD pol 3)
+//   "187"   + ",200" + ".00"  both at once (rare)
+//
+// Glue them back together so the downstream numeric regex sees a single
+// token. We run multiple passes until convergence so a three-way split
+// folds correctly: "187" → "187,200" → "187,200.00".
 function mergeSplitNumbers(row) {
+  let prev = row;
+  for (let pass = 0; pass < 4; pass++) {
+    const next = mergeSplitNumbersOnce(prev);
+    if (next.length === prev.length) return next;
+    prev = next;
+  }
+  return prev;
+}
+
+function mergeSplitNumbersOnce(row) {
   const out = [];
   for (let i = 0; i < row.length; i++) {
     const cur = row[i];
     const next = row[i + 1];
     if (
       next
+      // cur ends with a digit — could be the head of a number
       && /\d$/.test(cur.text)
-      && /^\.\d+$/.test(next.text)
+      // next is a continuation: a decimal fragment ".<digits>" OR a
+      // thousand group ",<digits>{3}…". The {3,} guard avoids gluing
+      // unrelated comma-prefixed text accidentally.
+      && (/^\.\d/.test(next.text) || /^,\d{3}\b/.test(next.text))
+      // and the two pieces are visually close — PDF.js artefact, not two
+      // unrelated columns side by side
       && (next.x - cur.x) < 30
     ) {
       out.push({ ...cur, text: cur.text + next.text });
