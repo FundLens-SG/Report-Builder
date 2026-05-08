@@ -236,76 +236,25 @@ function enrichHoldings(holdings, accountValue) {
   }));
 }
 
+// Display the fund name EXACTLY as Manulife wrote it in the PDF — share
+// class, currency, hedge markers, distribution codes and all. The only
+// thing this function does is patch up PDF.js word-level extraction
+// artefacts so compound words don't render with a stray space:
+//   "Bh- SGD"      → "Bh-SGD"
+//   "Multi- Asset" → "Multi-Asset"
+//   "H2- SGD"      → "H2-SGD"
+// We deliberately preserve real separator dashes ("Manulife Global Fund - …")
+// because they're part of the canonical name. Earlier versions of this
+// function tried to "shorten" the name by stripping share-class tails;
+// that lost meaningful descriptors (Hard Currency, Diversified Income, Opps)
+// and ended up trimming things the user wanted preserved. The user's
+// reasonable expectation: type the full name exactly as the report shows it.
 export function shortenFundName(full) {
   let s = (full || '').trim();
-
-  // 1) Re-fuse PDF.js word-level splits like "Bh- SGD" / "H2- SGD" / "Multi-
-  //    Asset" that look like split tokens. We ONLY collapse when the
-  //    hyphen/slash is glued to the preceding token (no space before it) —
-  //    that's the PDF.js artefact signature. Real separator dashes such as
-  //    "Fund - Global" have spaces on BOTH sides and stay intact, so the
-  //    "Manulife Global Fund - <SpecificFund>" structure is preserved for
-  //    later rules to act on.
+  // Re-fuse only when the dash/slash is glued to the preceding token
+  // (PDF.js artefact signature: no space before, space after). Real
+  // separator dashes — " - " — have spaces on both sides and stay intact.
   s = s.replace(/(\S[\/\-])\s+(\S)/g, '$1$2');
-
-  // 2) "Manulife Global Fund - X" → "Manulife Global X". Then collapse the
-  //    accidental "Manulife Global Global …" double when X happened to start
-  //    with "Global" (e.g. "Manulife Global Fund - Global Multi-Asset …").
-  s = s.replace(/^Manulife Global Fund\s*-\s*/i, 'Manulife Global ');
-  s = s.replace(/^Manulife Global Global\s+/i, 'Manulife Global ');
-
-  // 3) "Amova Investment Funds - Amova X" → "Amova X" (drop the
-  //    boilerplate prefix; "Amova Singapore Dividend Equity" reads cleaner
-  //    than "Amova Investment Funds - Amova Singapore Dividend Equity").
-  s = s.replace(/^Amova Investment Funds\s*-\s*Amova\s+/i, 'Amova ');
-
-  // 4) Strip from the FIRST share-class marker to end of string. Descriptive
-  //    words (Hard Currency, Diversified Income, Opps, Healthcare, Preferred
-  //    Securities …) sit BEFORE the share-class block, so anchoring on the
-  //    share-class token keeps them intact instead of getting cut off.
-  //    Tokens we recognise as share-class boundaries:
-  //
-  //      Allianz suffix:      AMi3, AMi5, AMi9 (\d*)
-  //      Letter classes:      A, AA, A2, B, B2, Bh (with optional -CCY)
-  //      Hedge markers:       H, H2 (with optional -CCY)
-  //      Distribution codes:  MDIST, MInc, MD, Acc, ACC
-  //      Standalone Hedged:   Hedged
-  //      Currency codes:      SGD, USD, EUR, HKD, JPY, CNY, GBP, AUD
-  //      Inc as share class:  only when followed by AA / AMi / paren so the
-  //                           word "Income" (e.g. "Allianz Income and
-  //                           Growth …") is left alone.
-  //      Parenthesised codes: (LUX), (SGD), (SGD Hedged), (SGD H), (G), …
-  // The wordlike tokens need a trailing \b so we don't accidentally chop
-  // inside a longer identifier ("Acc" inside "Accumulator", say). The
-  // parenthesised alternative ends with `)` — a non-word char with another
-  // non-word char (space) after, so \b doesn't fire there. Splitting the
-  // alternation lets each branch use the right anchor.
-  const WORDLIKE = (
-    // Allianz must come before bare A/AA so "AMi3" wins
-    'AMi\\d*'
-    + '|AA?[12]?(?:-[A-Z]{3})?'
-    + '|B[12h]?(?:-[A-Z]{3})?'
-    + '|H[12]?(?:-[A-Z]{3})?'
-    + '|MDIST|MInc|MD|Acc'
-    + '|Hedged'
-    + '|(?:SGD|USD|EUR|HKD|JPY|CNY|GBP|AUD)'
-    // Inc as share-class — ONLY before AA / AMi / paren so the WORD
-    // "Income" (e.g. "Allianz Income and Growth") stays intact.
-    + '|Inc(?=\\s+(?:AA?[12]?|AMi)|\\s*\\()'
-  );
-  // Parenthesised codes — (LUX), (SGD), (SGD Hedged), (SGD H), (G), (H2-SGD), …
-  const PARENS = '\\([A-Z0-9][^)]*\\)';
-  const SHARE_CLASS_TAIL = new RegExp(
-    `\\s+(?:(?:${WORDLIKE})\\b|${PARENS}).*$`,
-    'i',
-  );
-  s = s.replace(SHARE_CLASS_TAIL, '');
-
-  // 5) Trailing " Fund" is mostly redundant in display ("Capital Group
-  //    New Perspective" reads as well as "Capital Group New Perspective
-  //    Fund" and is shorter). Drop it when nothing meaningful followed.
-  s = s.replace(/\s+Fund$/i, '');
-
   return s.trim();
 }
 

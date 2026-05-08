@@ -168,70 +168,28 @@ def _enrich_holdings(holdings: list[Holding], account_value: float) -> list[dict
 
 
 def shorten_fund_name(full: str) -> str:
-    """Shorten verbose Manulife fund names for the per-fund table.
+    """Display the fund name EXACTLY as Manulife wrote it.
 
-    Examples:
-        'Capital Group New Perspective Fund (LUX) Bh-SGD' -> 'Capital Group New Perspective'
-        'Schroder Asian Growth Fund SGD'                   -> 'Schroder Asian Growth'
-        'Neuberger Berman US MultiCap Opps SGD A Acc'      -> 'Neuberger Berman US MultiCap'
-        'Neuberger Berman EM Debt Hard Currency SGD A MD'  -> 'Neuberger Berman EM Debt'
-        'Manulife Global Fund - Global Multi-Asset Diversified Income Fund AA (SGD Hedged) MDIST (G)'
-            -> 'Manulife Global Multi-Asset'
-        'Manulife Global Fund - Healthcare Fund AA SGD H ACC'
-            -> 'Manulife Global Healthcare'
-        'Manulife Global Fund - Preferred Securities Inc AA (SGD H) MDIST (G)'
-            -> 'Manulife Global Preferred Securities'
-        'Allianz Income and Growth AMi3 (H2-SGD)'          -> 'Allianz Income and Growth'
-        'Amova Investment Funds - Amova Singapore Dividend Equity Fund SGD'
-            -> 'Amova Singapore Dividend Equity'
+    This function used to "shorten" the verbose name by stripping
+    share-class / hedge / distribution suffixes — but every iteration of
+    that lost meaningful descriptors (Hard Currency, Diversified Income,
+    Opps, …) and the user reasonably wants the canonical name preserved.
+    The only thing we do here is patch up PDF.js word-level extraction
+    artefacts so compound words don't render with a stray space:
+
+        'Bh- SGD'      -> 'Bh-SGD'
+        'Multi- Asset' -> 'Multi-Asset'
+        'H2- SGD'      -> 'H2-SGD'
+
+    Real separator dashes (' - ') are preserved verbatim because
+    'Manulife Global Fund - Global Multi-Asset Diversified Income Fund
+    AA (SGD Hedged) MDIST (G)' is the canonical name as printed in the
+    PDF and that's exactly what the report should display.
     """
     s = full.strip()
-
-    # Re-fuse PDF.js word-level splits like "Bh- SGD" / "Multi- Asset" but
-    # NOT separator dashes ("Fund - Global"). Compound splits have the dash
-    # glued to the preceding token (no space before).
+    # Re-fuse only when the dash/slash is glued to the preceding token —
+    # PDF.js artefact signature is no-space-before / space-after. Real
+    # separator dashes (' - ') stay intact because they have spaces on
+    # both sides.
     s = re.sub(r"(\S[\/\-])\s+(\S)", r"\1\2", s)
-
-    # "Manulife Global Fund - X" → "Manulife Global X". Then collapse the
-    # accidental "Manulife Global Global …" double when X started with
-    # "Global" (e.g. "Manulife Global Fund - Global Multi-Asset").
-    s = re.sub(r"^Manulife Global Fund\s*-\s*", "Manulife Global ", s, flags=re.IGNORECASE)
-    s = re.sub(r"^Manulife Global Global\s+", "Manulife Global ", s, flags=re.IGNORECASE)
-
-    # "Amova Investment Funds - Amova X" → "Amova X"
-    s = re.sub(r"^Amova Investment Funds\s*-\s*Amova\s+", "Amova ", s, flags=re.IGNORECASE)
-
-    # Strip from the FIRST share-class marker to end of string. Descriptive
-    # words (Hard Currency, Diversified Income, Opps, Healthcare, Preferred
-    # Securities …) sit BEFORE the share-class block, so anchoring on the
-    # share-class token keeps them intact. Tokens we recognise:
-    #   Allianz suffix:      AMi3, AMi5 (\d*)
-    #   Letter classes:      A, AA, A2, B, B2, Bh (with optional -CCY)
-    #   Hedge markers:       H, H2 (with optional -CCY)
-    #   Distribution codes:  MDIST, MInc, MD, Acc
-    #   Standalone Hedged:   Hedged
-    #   Currency codes:      SGD, USD, EUR, HKD, JPY, CNY, GBP, AUD
-    #   Inc as share class:  only before AA / AMi / paren (so the WORD
-    #                        'Income' stays intact)
-    #   Parenthesised codes: (LUX), (SGD), (SGD Hedged), (SGD H), (G), …
-    wordlike = (
-        r"AMi\d*"
-        r"|AA?[12]?(?:-[A-Z]{3})?"
-        r"|B[12h]?(?:-[A-Z]{3})?"
-        r"|H[12]?(?:-[A-Z]{3})?"
-        r"|MDIST|MInc|MD|Acc"
-        r"|Hedged"
-        r"|(?:SGD|USD|EUR|HKD|JPY|CNY|GBP|AUD)"
-        r"|Inc(?=\s+(?:AA?[12]?|AMi)|\s*\()"
-    )
-    parens = r"\([A-Z0-9][^)]*\)"
-    share_class_tail = re.compile(
-        rf"\s+(?:(?:{wordlike})\b|{parens}).*$",
-        re.IGNORECASE,
-    )
-    s = share_class_tail.sub("", s)
-
-    # Trailing " Fund" is mostly redundant in display.
-    s = re.sub(r"\s+Fund$", "", s, flags=re.IGNORECASE)
-
     return s.strip()
