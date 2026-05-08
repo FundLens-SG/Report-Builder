@@ -504,22 +504,25 @@ body::after {
   color: var(--ink-3);
 }
 
-/* Detected-products summary table. Read-only — shows what variants were
-   found in the upload and the auto-applied rates. Sits above the toggle
-   rows. The toggles below are global; the per-policy rate is sourced from
-   the variant each policy belongs to. */
+/* Detected-products summary table. Each row carries an "Apply" checkbox
+   so the user can opt specific product groups OUT of the global Exclude
+   Welcome / Annual Premium toggles. MANUAL rows are shown but their
+   checkbox is disabled — toggling has no mathematical effect. */
 .detected-summary {
-  padding: 14px 24px;
+  padding: 14px 24px 16px;
   background: var(--bg-inset);
   border-bottom: 1px solid var(--hairline);
 }
-.detected-summary-title {
+.detected-summary-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.detected-summary-head .title {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink-3);
-  margin: 0 0 10px;
 }
 .detected-summary-list {
   list-style: none;
@@ -527,27 +530,110 @@ body::after {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 .detected-summary-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto auto;
+  /* apply | count | product | status pill | rates */
+  grid-template-columns: 28px 44px minmax(0, 1fr) 96px auto;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   font-size: 13px;
   color: var(--ink);
+  padding: 4px 4px;
+  border-radius: 6px;
+  transition: background 160ms var(--easeOut);
 }
+.detected-summary-row:not(.is-header):not(.is-disabled):hover {
+  background: oklch(1 0 0 / 0.025);
+}
+
+/* Header row: explicit column titles in mono uppercase so the table
+   reads as a table at a glance. */
+.detected-summary-row.is-header {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  padding: 4px 4px 8px;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 2px;
+}
+.detected-summary-row.is-header .count,
+.detected-summary-row.is-header .name,
+.detected-summary-row.is-header .apply-col,
+.detected-summary-row.is-header .status-col,
+.detected-summary-row.is-header .rates {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--ink-3);
+  font-weight: 500;
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-family: var(--mono);
+  min-width: 0;
+  text-align: left;
+}
+.detected-summary-row.is-header .count { text-align: center; }
+.detected-summary-row.is-header .status-col { text-align: left; }
+.detected-summary-row.is-header .rates { text-align: right; }
+
+.detected-summary-row.is-disabled {
+  opacity: 0.62;
+}
+
+/* Apply checkbox — smaller cousin of the bonus-row check, sized to fit
+   the table row without dominating it. */
+.apply-check {
+  position: relative;
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.apply-check input { position: absolute; opacity: 0; inset: 0; cursor: pointer; z-index: 1; }
+.apply-check input:disabled { cursor: not-allowed; }
+.apply-check .box {
+  width: 16px; height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--hairline-2);
+  background: var(--bg-card);
+  display: grid; place-items: center;
+  pointer-events: none;
+  transition: all 160ms var(--easeOut);
+}
+.apply-check input:checked + .box {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.apply-check input:disabled + .box {
+  opacity: 0.55;
+  background: transparent;
+}
+.apply-check .box svg {
+  width: 9px; height: 9px;
+  color: oklch(0.18 0.04 60);
+  opacity: 0;
+  transform: scale(0.6);
+  transition: all 160ms var(--easeOut);
+}
+.apply-check input:checked + .box svg { opacity: 1; transform: scale(1); }
+
+/* Cell styling */
 .detected-summary-row .count {
   font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   background: oklch(1 0 0 / 0.06);
   border: 1px solid var(--hairline-2);
   border-radius: 999px;
-  padding: 2px 6px;
+  padding: 3px 8px;
   text-align: center;
-  color: var(--ink-2);
-  min-width: 32px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 .detected-summary-row .name {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -562,6 +648,9 @@ body::after {
   padding: 3px 8px;
   border-radius: 999px;
   white-space: nowrap;
+  display: inline-block;
+  text-align: center;
+  font-weight: 500;
 }
 .detected-summary-row .pill.detected {
   background: var(--accent-dim);
@@ -569,7 +658,7 @@ body::after {
 }
 .detected-summary-row .pill.manual {
   background: oklch(1 0 0 / 0.06);
-  color: var(--ink-2);
+  color: var(--ink-3);
   border: 1px solid var(--hairline-2);
 }
 .detected-summary-row .rates {
@@ -578,12 +667,13 @@ body::after {
   font-variant-numeric: tabular-nums;
   color: var(--ink-2);
   white-space: nowrap;
-  min-width: 86px;
+  min-width: 96px;
   text-align: right;
 }
 .detected-summary-row .rates .none {
   color: var(--ink-4);
   font-style: italic;
+  font-size: 11px;
 }
 .bonus-row {
   display: grid;

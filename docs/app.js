@@ -306,27 +306,61 @@ function detectedGroups() {
   return groups;
 }
 
+// Per-group "apply globals" set. A group's policies inherit the global
+// Exclude-Welcome / Exclude-Annual-Premium toggles only if its key is in
+// this set. MANUAL groups never enter the set (their auto rates are 0 % so
+// applying or not has the same effect — a no-op). DETECTED groups join the
+// set the first time they're seen and stay there until the user unchecks
+// the row, surviving subsequent re-renders.
+const includedGroupKeys = new Set();
+
+function groupKey(grp) {
+  return grp.recognised
+    ? `auto::${grp.product}::${grp.variation}`
+    : `manual::${grp.policyName || 'Unknown'}`;
+}
+
 function renderDetectedSummary() {
-  const groups = detectedGroups();
-  if (!groups.size) {
+  const groupsMap = detectedGroups();
+  if (!groupsMap.size) {
     adjustmentsBlock.hidden = true;
     return;
   }
   adjustmentsBlock.hidden = false;
 
-  const totalPolicies = [...groups.values()].reduce((s, g) => s + g.policies.length, 0);
-  const rows = [...groups.values()].map(grp => {
+  // Sort: DETECTED first, then by policy count descending. Inside each
+  // half, ties broken by name so the list is deterministic across renders.
+  const groups = [...groupsMap.values()].sort((a, b) => {
+    if (a.recognised !== b.recognised) return a.recognised ? -1 : 1;
+    if (a.policies.length !== b.policies.length) return b.policies.length - a.policies.length;
+    const an = a.recognised ? `${a.product} ${a.variation}` : (a.policyName || '');
+    const bn = b.recognised ? `${b.product} ${b.variation}` : (b.policyName || '');
+    return an.localeCompare(bn);
+  });
+
+  const totalPolicies = groups.reduce((s, g) => s + g.policies.length, 0);
+
+  const rows = groups.map(grp => {
+    const key = groupKey(grp);
+    // Auto-include any newly seen DETECTED group on first render.
+    if (grp.recognised && !includedGroupKeys.has(key)) {
+      // Only seed the set when it's the FIRST time we've ever seen this key
+      // — distinct from "user unticked it then more PDFs landed". We track
+      // first-seen via a separate ever-seen Set.
+      if (!everSeenGroupKeys.has(key)) {
+        includedGroupKeys.add(key);
+      }
+      everSeenGroupKeys.add(key);
+    }
+    const checked = grp.recognised && includedGroupKeys.has(key);
+    const disabled = !grp.recognised;
+
     const title = grp.recognised
       ? `${PRODUCTS[grp.product].label} · ${esc(grp.variation)}`
       : esc(grp.policyName || 'Unrecognised product');
     const pill = grp.recognised
       ? '<span class="pill detected">DETECTED</span>'
       : '<span class="pill manual">MANUAL</span>';
-    // Welcome rate is tiered by annual premium, so policies in the same
-    // (product, variation) group COULD land in different tiers. We use the
-    // first policy's tier as the representative rate for the summary; the
-    // actual render still computes the tier per-policy so each one gets the
-    // correct number applied.
     const repPolicy = grp.policies[0];
     const auto = grp.recognised
       ? lookupBonusRates(grp.product, grp.variation, annualPremiumFor(repPolicy))
@@ -334,8 +368,13 @@ function renderDetectedSummary() {
     const rates = grp.recognised
       ? `${(auto.welcomeRate * 100).toFixed(1)}% · ${(auto.annualPremiumRate * 100).toFixed(1)}%`
       : '<span class="none">no published bonus</span>';
+
     return `
-      <li class="detected-summary-row">
+      <li class="detected-summary-row${disabled ? ' is-disabled' : ''}" data-group-key="${esc(key)}">
+        <label class="apply-check" title="${disabled ? 'No published bonus — toggling has no effect on these policies' : 'Apply the global bonus toggles to this group'}">
+          <input type="checkbox" data-apply-group ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+          <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </label>
         <span class="count">${grp.policies.length}</span>
         <span class="name">${title}</span>
         ${pill}
@@ -345,16 +384,56 @@ function renderDetectedSummary() {
   }).join('');
 
   detectedSummaryEl.innerHTML = `
-    <p class="detected-summary-title">Detected products · ${totalPolicies} polic${totalPolicies === 1 ? 'y' : 'ies'} total</p>
-    <ul class="detected-summary-list">${rows}</ul>
+    <div class="detected-summary-head">
+      <span class="title">Detected products · ${totalPolicies} polic${totalPolicies === 1 ? 'y' : 'ies'} total</span>
+    </div>
+    <ul class="detected-summary-list" role="table" aria-label="Detected products">
+      <li class="detected-summary-row is-header" role="row">
+        <span class="apply-col" role="columnheader">Apply</span>
+        <span class="count" role="columnheader">Policies</span>
+        <span class="name" role="columnheader">Product</span>
+        <span class="status-col" role="columnheader">Status</span>
+        <span class="rates" role="columnheader">Welcome · Annual</span>
+      </li>
+      ${rows}
+    </ul>
   `;
 }
 
-// Per-policy options for the deriver. The two booleans come from the global
-// toggles; rates are deliberately NOT supplied here so derive() falls back
-// to its own per-policy auto-lookup (which uses raw.product + raw.variation
-// + this policy's actual annualPremium tier).
-function bonusOptionsForPolicy(_raw) {
+// Tracks which group keys we've EVER auto-included. Without this, unticking
+// a group and then dropping another PDF that lands in the same group would
+// re-tick it (because renderDetectedSummary "first-time" semantics would
+// fire again).
+const everSeenGroupKeys = new Set();
+
+// Event delegation for the per-row apply checkboxes. Toggling rebuilds the
+// inclusion set and triggers a fresh render of every policy in the batch.
+detectedSummaryEl.addEventListener('change', (e) => {
+  const t = e.target;
+  if (!t.matches('input[data-apply-group]')) return;
+  const row = t.closest('.detected-summary-row');
+  const key = row?.dataset.groupKey;
+  if (!key) return;
+  if (t.checked) includedGroupKeys.add(key);
+  else includedGroupKeys.delete(key);
+  refreshBonusTotals();
+  scheduleRerender();
+});
+
+// Per-policy options for the deriver. Two filters compose:
+//   1. Global toggle: which BONUS TYPE to exclude (welcome, annual, or both)
+//   2. Per-row Apply checkbox: which PRODUCT GROUPS those toggles apply to
+// A policy receives an exclusion only when both axes line up. Anything
+// outside the included-groups set falls through with an empty options
+// object → derive() returns the policy's PDF-stated values unchanged.
+function bonusOptionsForPolicy(raw) {
+  const recognised = !!(raw.product && raw.variation && PRODUCTS[raw.product]?.variations?.[raw.variation]);
+  const key = recognised
+    ? `auto::${raw.product}::${raw.variation}`
+    : `manual::${raw.policyName || 'Unknown'}`;
+  if (!includedGroupKeys.has(key)) {
+    return {};  // group opted-out → no bonus exclusion regardless of global toggles
+  }
   return {
     excludeWelcomeBonus: excludeWelcomeEl.checked,
     excludeAnnualPremiumBonus: excludeAnnualEl.checked,
@@ -373,10 +452,9 @@ excludeAnnualEl.addEventListener('change', () => {
 });
 
 function refreshBonusTotals() {
-  // Right-side hint on each toggle row. Counts how many of the uploaded
-  // policies actually carry a published bonus rate for that bonus type;
-  // those are the policies the toggle has any effect on. MANUAL / 0%-rate
-  // policies aren't "bonusable" so we surface that explicitly.
+  // Right-side hint on each toggle row. Counts policies that BOTH have a
+  // published bonus rate AND belong to a group the user has ticked Apply
+  // for — those are the policies the global toggle will affect.
   const policies = allParsedPolicies();
   if (!policies.length) {
     welcomeTotalEl.textContent = '—';
@@ -385,6 +463,11 @@ function refreshBonusTotals() {
   }
   let welcomable = 0, annualable = 0;
   for (const { raw } of policies) {
+    const recognised = !!(raw.product && raw.variation && PRODUCTS[raw.product]?.variations?.[raw.variation]);
+    const key = recognised
+      ? `auto::${raw.product}::${raw.variation}`
+      : `manual::${raw.policyName || 'Unknown'}`;
+    if (!includedGroupKeys.has(key)) continue;
     const auto = lookupBonusRates(raw.product, raw.variation, annualPremiumFor(raw));
     if ((auto.welcomeRate || 0) > 0) welcomable += 1;
     if ((auto.annualPremiumRate || 0) > 0) annualable += 1;
