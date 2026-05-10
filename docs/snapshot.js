@@ -25,6 +25,7 @@ export function buildSnapshotElement(data) {
   root.innerHTML = `
     ${header(data)}
     ${metricCards(data)}
+    ${trendSection(data)}
     ${investmentJourney(data)}
     ${allocationSection(data)}
     ${holdingsTable(data)}
@@ -152,6 +153,138 @@ function signedPct(n) {
   return `+${fmtPct2(n)}%`;
 }
 
+
+// ---------- Trend section (Drive-backed history) ----------------------------
+//
+// Renders only when this policy has 2+ snapshots tracked. Combines two
+// sources:
+//   1. data.history.snapshots — saved Drive history (and/or localStorage)
+//   2. The currently displayed snapshot itself, injected as a tentative
+//      point at the rightmost end (deduped by reportDateIso).
+//
+// Without (2) the chart would lag behind reality: a user uploading their
+// 2026-Q2 report would see a trend ending at 2026-Q1, even though Q2 is
+// the very report they're looking at. Tentative-injection keeps the
+// chart anchored to "now" before the user has clicked Save to Drive.
+//
+// Sparkline is inline SVG so it survives html2canvas without needing a
+// canvas context. Range is auto-fitted to the min/max of accountValue
+// across all merged points.
+
+const MONTH_TO_NUM = { Jan:'01', Feb:'02', Mar:'03', Apr:'04', May:'05', Jun:'06', Jul:'07', Aug:'08', Sep:'09', Oct:'10', Nov:'11', Dec:'12' };
+function _reportDateToIso(reportDate) {
+  if (!reportDate) return null;
+  const m = String(reportDate).trim().match(/^(\d{1,2})\s+([A-Za-z]{3})[a-z]*\s+(\d{4})$/);
+  if (!m) return null;
+  const mm = MONTH_TO_NUM[m[2].slice(0, 3)];
+  if (!mm) return null;
+  return `${m[3]}-${mm}-${m[1].padStart(2, '0')}`;
+}
+
+function trendSection(d) {
+  const stored = Array.isArray(d.history?.snapshots) ? d.history.snapshots : [];
+
+  // Build the rightmost tentative point from the snapshot being rendered
+  // RIGHT NOW. If the same reportDateIso is already in `stored` (because
+  // the user previously saved this exact report), drop the stored copy
+  // in favour of the live values — they reflect any unsaved bonus toggle
+  // adjustments the user has made since the last save.
+  const currentIso = _reportDateToIso(d.reportDate);
+  const tentative = currentIso ? {
+    reportDate:       d.reportDate || '',
+    reportDateIso:    currentIso,
+    accountValue:     Number(d.accountValue || 0),
+    annualisedPnlPct: Number(d.annualisedPnlPct || 0),
+    totalPnlDollar:   Number(d.totalPnlDollar || 0),
+  } : null;
+
+  const merged = stored
+    .filter(s => typeof s.accountValue === 'number')
+    .filter(s => !tentative || s.reportDateIso !== tentative.reportDateIso);
+  if (tentative) merged.push(tentative);
+  merged.sort((a, b) => String(a.reportDateIso || '').localeCompare(String(b.reportDateIso || '')));
+
+  if (merged.length < 2) return '';
+  const points = merged;
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  const accountDelta = last.accountValue - first.accountValue;
+  const irrFrom = Number(first.annualisedPnlPct || 0);
+  const irrTo = Number(last.annualisedPnlPct || 0);
+
+  const chartWidth = 360;
+  const chartHeight = 56;
+  const padding = 6;
+  const values = points.map(p => Number(p.accountValue || 0));
+  const minV = Math.min(...values);
+  const maxV = Math.max(...values);
+  const range = (maxV - minV) || 1;   // avoid div-by-zero on flat lines
+  const innerW = chartWidth - padding * 2;
+  const innerH = chartHeight - padding * 2;
+  const stepX = points.length > 1 ? innerW / (points.length - 1) : innerW;
+
+  const coord = (i, v) => {
+    const x = padding + i * stepX;
+    const y = padding + innerH - ((v - minV) / range) * innerH;
+    return [x, y];
+  };
+
+  const linePath = values.map((v, i) => {
+    const [x, y] = coord(i, v);
+    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+
+  // Soft fill under the line so the sparkline reads as area-of-growth.
+  const areaPath =
+    `${linePath} L${(padding + (points.length - 1) * stepX).toFixed(1)},${(padding + innerH).toFixed(1)}` +
+    ` L${padding.toFixed(1)},${(padding + innerH).toFixed(1)} Z`;
+
+  const dots = values.map((v, i) => {
+    const [x, y] = coord(i, v);
+    const isLast = i === values.length - 1;
+    const r = isLast ? 3.5 : 2.2;
+    const fill = isLast ? '#0F6E56' : '#1D9E75';
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="${fill}" />`;
+  }).join('');
+
+  const trendPositive = accountDelta >= 0;
+  const arrow = trendPositive ? '↑' : '↓';
+  const arrowColor = trendPositive ? '#0F6E56' : '#A4262C';
+  const deltaStr = trendPositive
+    ? `+S$${fmt2(accountDelta)}`
+    : `−S$${fmt2(Math.abs(accountDelta))}`;
+
+  // IRR delta — "12.10% → 14.40%". Skip when both sides are zero (e.g.
+  // very early snapshots where IRR isn't reported).
+  const irrPart = (irrFrom !== 0 || irrTo !== 0)
+    ? ` · IRR ${fmtPct2(irrFrom)}% → ${fmtPct2(irrTo)}%`
+    : '';
+
+  return `
+  <div style="background: #ffffff; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 12px; padding: 14px 16px; margin-bottom: 1.25rem;">
+    <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px;">
+      <p style="font-size: 11px; color: #888780; margin: 0; letter-spacing: 0.5px;">TREND · ${points.length} SNAPSHOTS TRACKED</p>
+      <p style="font-size: 11px; color: #888780; margin: 0;">${esc(first.reportDate || '')} → ${esc(last.reportDate || '')}</p>
+    </div>
+    <svg width="${chartWidth}" height="${chartHeight}" viewBox="0 0 ${chartWidth} ${chartHeight}" style="display: block; width: 100%; height: ${chartHeight}px; overflow: visible;">
+      <defs>
+        <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#1D9E75" stop-opacity="0.18"/>
+          <stop offset="100%" stop-color="#1D9E75" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <path d="${areaPath}" fill="url(#trend-fill)" stroke="none"/>
+      <path d="${linePath}" fill="none" stroke="#1D9E75" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      ${dots}
+    </svg>
+    <p style="font-size: 11.5px; color: #5f5e5a; margin: 8px 0 0 0; line-height: 1.5;">
+      <span style="color: ${arrowColor}; font-weight: 500;">${arrow} ${deltaStr}</span>
+      since ${esc(first.reportDate || '')}${irrPart}
+    </p>
+  </div>`;
+}
+
 function investmentJourney(d) {
   const dots = Array.from({ length: d.flexiTerm }, (_, i) => {
     const filled = i < d.premiumsPaidCount;
@@ -166,9 +299,25 @@ function investmentJourney(d) {
   // Welcome bonus + annual premium bonus are added (not compounded) on
   // first-year premium. Show them as one consolidated "First Year Bonus" row
   // in the report — the breakdown lives in the settings panel only.
+  //
+  // For InvestReady (III) on monthly-pay, the 5% annual premium bonus does
+  // NOT apply (Manulife rule: forfeited when frequency is monthly). The
+  // deriver already zeros out the rate in that case, so the displayed % and
+  // dollar amount reflect "welcome only". We append a "(monthly)" hint so the
+  // user can see at a glance which interpretation drove the bonus number.
   const totalBonusRate = (d.welcomeBonusRate || 0) + (d.annualPremiumBonusRate || 0);
+  const isInvestReadyIII = d.product === 'InvestReady (III)';
+  const monthlyHint = (isInvestReadyIII && d.premiumFrequency === 'monthly' && !d.premiumFrequencyAmbiguous)
+    ? ' <span style="color: #aaa; font-style: italic;">· monthly-pay (no annual bonus)</span>'
+    : '';
   const firstYearBonusRow = d.totalBonusPrincipal > 0
-    ? `<div style="color: #888780;">First Year Bonus (${fmtPct1(totalBonusRate * 100)}%): <span style="color: #5f5e5a;">S$${fmt2(d.totalBonusPrincipal)}</span></div>`
+    ? `<div style="color: #888780;">First Year Bonus (${fmtPct1(totalBonusRate * 100)}%): <span style="color: #5f5e5a;">S$${fmt2(d.totalBonusPrincipal)}</span>${monthlyHint}</div>`
+    : '';
+  // Genuine 12/24/36-month-boundary ambiguity — math can't tell monthly from
+  // annual. We default to annual for the bonus calc; warn so the advisor can
+  // mentally subtract the 5% if their client is actually monthly-pay.
+  const frequencyDisclaimerRow = (isInvestReadyIII && d.premiumFrequencyAmbiguous && d.totalBonusPrincipal > 0)
+    ? `<div style="color: #aaa; font-style: italic; font-size: 10px; margin-top: 2px; line-height: 1.4;">Pay frequency is at an anniversary mark — monthly vs annual is indistinguishable. Bonus assumes ANNUAL; subtract 5% if monthly-pay.</div>`
     : '';
 
   return `
@@ -182,6 +331,7 @@ function investmentJourney(d) {
           <div style="color: #888780;">Annual premium: <span style="color: #1a1a1a; font-weight: 500;">S$${fmt2(d.annualPremium)}</span></div>
           ${riderRow}
           ${firstYearBonusRow}
+          ${frequencyDisclaimerRow}
           <div style="color: #888780;">Reinvested dividends: <span style="color: #5f5e5a;">S$${fmt2(d.totalDividendsReinvested)}</span></div>
         </div>
       </div>
@@ -211,11 +361,15 @@ function investmentJourney(d) {
 }
 
 function allocationSection(d) {
+  // Long Manulife fund names (e.g. "Manulife Global Fund - Global Multi-Asset
+  // Diversified Income Fund AA (SGD Hedged) MDIST (G)") need to wrap onto
+  // multiple lines instead of getting truncated with ellipsis. align-items
+  // flex-start so the colour dot pins to the first line.
   const legend = d.holdingsEnriched.map(h => `
-    <div style="display: flex; align-items: center; gap: 8px;">
-      <span style="width: 10px; height: 10px; border-radius: 2px; background: ${h.color}; flex-shrink: 0;"></span>
-      <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(h.displayName)} (${esc(h.ticker)})</span>
-      <span style="font-weight: 500;">${fmtPct2(h.allocationPct)}%</span>
+    <div style="display: flex; align-items: flex-start; gap: 8px; line-height: 1.45;">
+      <span style="width: 10px; height: 10px; border-radius: 2px; background: ${h.color}; flex-shrink: 0; margin-top: 4px;"></span>
+      <span style="flex: 1; min-width: 0; word-break: break-word; overflow-wrap: anywhere;">${esc(h.displayName)} (${esc(h.ticker)})</span>
+      <span style="font-weight: 500; flex-shrink: 0; margin-top: 0;">${fmtPct2(h.allocationPct)}%</span>
     </div>
   `).join('');
 
@@ -236,12 +390,16 @@ function holdingsTable(d) {
   const signMoney = (n) => (n < 0 ? `−${fmt2(Math.abs(n))}` : `+${fmt2(n)}`);
   const signPct = (n) => (n < 0 ? `−${fmtPct2(Math.abs(n))}%` : `+${fmtPct2(n)}%`);
 
+  // Fund-name cell wraps onto multiple lines for long Manulife share-class
+  // names. vertical-align: top so all the cells in a row line up to the
+  // first line of the fund name when it wraps. align-items: flex-start on
+  // the dot row pins the colour swatch to the first line.
   const rows = d.holdingsEnriched.map(h => `
-    <tr style="border-bottom: 0.5px solid rgba(0,0,0,0.08);">
+    <tr style="border-bottom: 0.5px solid rgba(0,0,0,0.08); vertical-align: top;">
       <td style="padding: 10px 6px;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="width: 8px; height: 8px; border-radius: 2px; background: ${h.color}; flex-shrink: 0;"></span>
-          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(h.displayName)}</span>
+        <div style="display: flex; align-items: flex-start; gap: 8px; line-height: 1.45;">
+          <span style="width: 8px; height: 8px; border-radius: 2px; background: ${h.color}; flex-shrink: 0; margin-top: 5px;"></span>
+          <span style="flex: 1; min-width: 0; word-break: break-word; overflow-wrap: anywhere;">${esc(h.displayName)}</span>
         </div>
       </td>
       <td style="padding: 10px 6px; color: #5f5e5a;">${esc(h.assetClassLabel)}</td>
@@ -257,10 +415,10 @@ function holdingsTable(d) {
     <table style="width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed;">
       <thead>
         <tr style="border-bottom: 0.5px solid rgba(0,0,0,0.18);">
-          <th style="text-align: left; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 38%;">Fund</th>
-          <th style="text-align: left; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 18%;">Asset class</th>
-          <th style="text-align: right; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 18%;">Value (SGD)</th>
-          <th style="text-align: right; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 14%;">P&amp;L ($)</th>
+          <th style="text-align: left; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 44%;">Fund</th>
+          <th style="text-align: left; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 16%;">Asset class</th>
+          <th style="text-align: right; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 16%;">Value (SGD)</th>
+          <th style="text-align: right; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 12%;">P&amp;L ($)</th>
           <th style="text-align: right; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 12%;">P&amp;L (%)</th>
         </tr>
       </thead>
@@ -306,6 +464,11 @@ function strategyFooter(d) {
     }
   }
 
+  // Optional "Prepared by …" line, rendered only when the user has filled in
+  // at least one advisor-profile field. Slightly more muted than the meta
+  // line and italic so it reads as attribution rather than disclosure.
+  const advisorLine = advisorProfileLine(d);
+
   return `
   <div style="background: #f5f4ee; border-radius: 8px; padding: 14px;">
     <p style="font-size: 11px; color: #888780; margin: 0 0 6px 0; letter-spacing: 0.5px;">STRATEGY &amp; POSITIONING</p>
@@ -320,7 +483,20 @@ function strategyFooter(d) {
       </div>
     </div>
     <p style="font-size: 10px; color: #888780; margin: 10px 0 0 0; padding-top: 8px; border-top: 0.5px solid rgba(0,0,0,0.08);">${footerMetaLine(d)}${adjustmentNote}</p>
+    ${advisorLine}
   </div>`;
+}
+
+// Builds the optional "Prepared by …" attribution line. Emits an empty
+// string when no profile fields are set so the footer collapses naturally.
+function advisorProfileLine(d) {
+  const p = d.advisorProfile;
+  if (!p || (!p.name && !p.title && !p.mobile)) return '';
+  const parts = [];
+  if (p.name)   parts.push(esc(p.name));
+  if (p.title)  parts.push(esc(p.title));
+  if (p.mobile) parts.push(esc(p.mobile));
+  return `<p style="font-size: 10px; color: #5f5e5a; margin: 6px 0 0 0; font-style: italic; letter-spacing: 0.01em;">Prepared by ${parts.join(' · ')}</p>`;
 }
 
 // Builds the bottom-of-card meta line. Each component (risk profile, CKA,

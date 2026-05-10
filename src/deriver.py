@@ -40,9 +40,15 @@ def derive(raw: RawReport) -> dict[str, Any]:
 
     months_invested = _months_between(issue_date, report_date)
     premiums_paid_count = count_anniversaries_paid(issue_date, report_date)
-    annual_premium = (
-        round(raw.policy_investment_cost / premiums_paid_count, 2) if premiums_paid_count else 0.0
+    inferred = infer_annual_premium(
+        raw.policy_investment_cost,
+        issue_date,
+        report_date,
+        premiums_paid_count,
     )
+    annual_premium = inferred["annual_premium"]
+    premium_frequency = inferred["frequency"]                # 'monthly' | 'annual'
+    premium_frequency_ambiguous = inferred["ambiguous"]
     premiums_remaining = max(0, flexi_term - premiums_paid_count)
 
     # capital_pct can exceed 100 when account < cost (a loss).
@@ -90,6 +96,8 @@ def derive(raw: RawReport) -> dict[str, Any]:
         "months_invested": months_invested,
         "premiums_paid_count": premiums_paid_count,
         "annual_premium": annual_premium,
+        "premium_frequency": premium_frequency,
+        "premium_frequency_ambiguous": premium_frequency_ambiguous,
         "premiums_remaining": premiums_remaining,
         "capital_pct": round(capital_pct, 1),
         "gains_pct": round(gains_pct, 1),
@@ -111,6 +119,82 @@ def count_anniversaries_paid(issue_date: date, report_date: date) -> int:
     if report_date >= next_anniv:
         return years_diff + 1
     return years_diff
+
+
+def infer_annual_premium(
+    total_paid: float, issue_date: date, report_date: date, anniversaries: int
+) -> dict[str, Any]:
+    """Infer the policy's annual premium and the inferred payment frequency.
+
+    The PDF doesn't state the premium frequency, so we back it out by trying
+    both interpretations:
+
+      ANNUAL  - one premium per anniversary year. Annual = total / anniversaries.
+      MONTHLY - one premium at inception then every month after.
+                Monthly rate = total / (months_elapsed + 1); annual = rate * 12.
+
+    Real-world Manulife premiums are multiples of $100 (often $500 / $1,000),
+    so we pick whichever interpretation lands closer to a clean $100 multiple.
+    Monthly only wins when its residual is BOTH <= $5 AND > $5 better than
+    annual's. Bias toward annual on near-ties (more common case).
+
+    Genuine ambiguity exists at 12 / 24 / 36-month boundaries — at those
+    moments an annual-pay $10K and a monthly-pay $833.33 client both produce
+    the same total_paid. The math can't tell them apart. We return the
+    annual interpretation (safer for the bonus calc) and set
+    ambiguous=True so the snapshot can render a disclaimer.
+
+    Returns: {'annual_premium': float, 'frequency': 'monthly'|'annual',
+              'ambiguous': bool}
+    """
+    if total_paid <= 0:
+        return {"annual_premium": 0.0, "frequency": "annual", "ambiguous": False}
+
+    annual_est = total_paid / anniversaries if anniversaries > 0 else 0.0
+
+    months_elapsed = _months_between(issue_date, report_date)
+    monthly_payments = months_elapsed + 1
+    monthly_annual_est = (
+        (total_paid / monthly_payments) * 12 if monthly_payments > 0 else 0.0
+    )
+
+    annual_residual = _residual_from_hundred(annual_est)
+    monthly_residual = _residual_from_hundred(monthly_annual_est)
+
+    if (
+        monthly_annual_est > 0
+        and monthly_residual <= 5
+        and monthly_residual < annual_residual - 5
+    ):
+        return {
+            "annual_premium": float(round(monthly_annual_est / 100) * 100),
+            "frequency": "monthly",
+            "ambiguous": False,
+        }
+
+    ambiguous = (
+        annual_est > 0
+        and monthly_annual_est > 0
+        and annual_residual <= 5
+        and monthly_residual <= 5
+        and abs(annual_est - monthly_annual_est) <= 5
+    )
+    # Snap to the nearest $100 when within $5 — absorbs sub-cent drift like
+    # $9,999.96 → $10,000. Preserve unusual values (e.g. $10,250) verbatim.
+    clean_annual = (
+        float(round(annual_est / 100) * 100) if annual_residual <= 5
+        else round(annual_est, 2)
+    )
+
+    return {
+        "annual_premium": clean_annual,
+        "frequency": "annual",
+        "ambiguous": ambiguous,
+    }
+
+
+def _residual_from_hundred(v: float) -> float:
+    return abs(v - round(v / 100) * 100)
 
 
 def _int_from(text: str, pattern: str) -> int | None:

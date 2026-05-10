@@ -42,9 +42,15 @@ export function derive(raw, options = {}) {
 
   const monthsInvested = monthsBetween(issueDate, reportDate);
   const premiumsPaidCount = countAnniversariesPaid(issueDate, reportDate);
-  const annualPremium = premiumsPaidCount
-    ? round2(raw.policyInvestmentCost / premiumsPaidCount)
-    : 0;
+  const inferred = inferAnnualPremium(
+    raw.policyInvestmentCost,
+    issueDate,
+    reportDate,
+    premiumsPaidCount,
+  );
+  const annualPremium = inferred.annualPremium;
+  const premiumFrequency = inferred.frequency;             // 'monthly' | 'annual'
+  const premiumFrequencyAmbiguous = inferred.ambiguous;     // true at 12/24/36-mo boundaries
   const premiumsRemaining = Math.max(0, flexiTerm - premiumsPaidCount);
 
   // Auto-detect bonus rates from the product/variation; allow caller overrides.
@@ -56,9 +62,23 @@ export function derive(raw, options = {}) {
   const welcomeBonusRate = auto.recognised
     ? (options.welcomeBonusRate ?? auto.welcomeRate)
     : 0;
-  const annualPremiumBonusRate = auto.recognised
+  let annualPremiumBonusRate = auto.recognised
     ? (options.annualPremiumBonusRate ?? auto.annualPremiumRate)
     : 0;
+
+  // Manulife rule: the InvestReady (III) annual premium bonus is paid only
+  // when premiums are collected ANNUALLY. Monthly-pay clients forfeit it
+  // entirely (the welcome bonus still applies). InvestReady Growth's 3 %
+  // annual bonus is unconditional — it stays even on monthly-pay because
+  // there's no first-year clawback. Only zero it out when we're CONFIDENT
+  // the policy is monthly; in the ambiguous (12/24/36-month boundary) case
+  // we leave the bonus in and surface a disclaimer to the user instead.
+  if (raw.product === 'InvestReady (III)'
+      && premiumFrequency === 'monthly'
+      && !premiumFrequencyAmbiguous) {
+    annualPremiumBonusRate = 0;
+  }
+
   const welcomeBonusAmount = round2(annualPremium * welcomeBonusRate);
   const annualPremiumBonusAmount = round2(annualPremium * annualPremiumBonusRate);
 
@@ -192,6 +212,9 @@ export function derive(raw, options = {}) {
     excludeWelcomeBonus: excludeWelcome,
     excludeAnnualPremiumBonus: excludeAnnual,
     adjustmentsActive,
+    // Frequency context (consumed by the snapshot for the disclaimer line)
+    premiumFrequency,
+    premiumFrequencyAmbiguous,
   };
 }
 
@@ -205,6 +228,93 @@ function countAnniversariesPaid(issueDate, reportDate) {
   nextAnniv.setFullYear(issueDate.getFullYear() + years);
   if (reportDate >= nextAnniv) return years + 1;
   return years;
+}
+
+// The PDF doesn't state the premium payment frequency (monthly / quarterly /
+// annual), so we have to infer it from the math. Two interpretations are
+// possible for any (totalPaid, monthsElapsed, anniversaries) triple:
+//
+//   ANNUAL  — premium collected once per anniversary year.
+//             count = anniversaries (incl. inception)
+//             rate  = totalPaid / count          ← already the annual premium
+//
+//   MONTHLY — premium collected at inception then every month after.
+//             count = monthsElapsed + 1          (inception is a payment date)
+//             rate  = totalPaid / count          ← monthly rate
+//             annualised = rate × 12
+//
+// Real-world Manulife premiums are multiples of $100 (often $500 / $1,000),
+// so pick whichever interpretation lands closer to a clean $100 multiple.
+// A bug we hit in the wild: a monthly $833.33 / $10,000-a-year policy was
+// mis-inferred as 2 annual installments of $9,583.32, dropping the welcome
+// bonus from the upper tier (45 %) to the lower tier (15 %) and roughly
+// halving the displayed first-year bonus.
+//
+// Bias toward annual on near-ties — annual is the more common case and the
+// PDF's structure (premium paid by anniversary) leans that way too. The
+// monthly inference only wins when it's BOTH very clean (≤ $5 from a $100
+// multiple) AND meaningfully cleaner than the annual one (by > $5).
+//
+// Genuine ambiguity exists when totalPaid happens to equal `annual × N` for
+// both interpretations — i.e. when monthlyPayments is itself a multiple of
+// 12 (months elapsed = 11, 23, 35, ...). At those boundaries an annual-pay
+// $10K and a monthly-pay $833.33 client both produce the same totalPaid.
+// We can't disambiguate, so we return frequency='annual' (the safer default
+// for the bonus calc) and set ambiguous=true so the snapshot can warn.
+//
+// Returns: { annualPremium, frequency: 'monthly'|'annual', ambiguous: bool }
+function inferAnnualPremium(totalPaid, issueDate, reportDate, anniversaries) {
+  if (totalPaid <= 0) {
+    return { annualPremium: 0, frequency: 'annual', ambiguous: false };
+  }
+
+  const annualEst = anniversaries > 0 ? totalPaid / anniversaries : 0;
+
+  const monthsElapsed = monthsBetween(issueDate, reportDate);
+  const monthlyPayments = monthsElapsed + 1;
+  const monthlyAnnualEst = monthlyPayments > 0
+    ? (totalPaid / monthlyPayments) * 12
+    : 0;
+
+  const annualResidual = residualFromHundred(annualEst);
+  const monthlyResidual = residualFromHundred(monthlyAnnualEst);
+
+  // Monthly inference is the clear winner.
+  if (monthlyAnnualEst > 0
+      && monthlyResidual <= 5
+      && monthlyResidual < annualResidual - 5) {
+    // Round to the nearest $100 to absorb sub-cent drift in the per-payment
+    // math (e.g. $833.331 × 12 = $9,999.97 → $10,000).
+    return {
+      annualPremium: Math.round(monthlyAnnualEst / 100) * 100,
+      frequency: 'monthly',
+      ambiguous: false,
+    };
+  }
+
+  // Both interpretations land on the SAME clean number (within a few dollars).
+  // This is the 12/24/36-month-boundary case — math can't tell the two apart.
+  const ambiguous = (
+    annualEst > 0 && monthlyAnnualEst > 0
+    && annualResidual <= 5 && monthlyResidual <= 5
+    && Math.abs(annualEst - monthlyAnnualEst) <= 5
+  );
+  // When the annual estimate is itself within $5 of a clean $100 multiple,
+  // snap to that multiple — absorbs sub-cent drift like $9,999.96 → $10,000.
+  // Otherwise preserve the exact value (e.g. an unusual $10,250 stays put).
+  const cleanAnnual = annualResidual <= 5
+    ? Math.round(annualEst / 100) * 100
+    : round2(annualEst);
+
+  return {
+    annualPremium: cleanAnnual,
+    frequency: 'annual',
+    ambiguous,
+  };
+}
+
+function residualFromHundred(v) {
+  return Math.abs(v - Math.round(v / 100) * 100);
 }
 
 function daysBetween(start, end) {
