@@ -300,13 +300,12 @@ function detectedGroups() {
     for (const raw of item.raws) {
       const recognised = !!(raw.product && raw.variation
         && PRODUCTS[raw.product]?.variations?.[raw.variation]);
-      const key = recognised
-        ? `auto::${raw.product}::${raw.variation}::${policyKey(item, raw)}`
-        : `manual::${raw.policyName || 'Unknown'}::${policyKey(item, raw)}`;
+      const key = policyAdjustmentKey(item, raw, recognised);
       if (!groups.has(key)) {
         groups.set(key, {
           key,
           recognised,
+          item,
           product: raw.product,
           variation: raw.variation,
           policyName: raw.policyName,
@@ -326,11 +325,93 @@ function detectedGroups() {
 // set the first time they're seen and stay there until the user unchecks
 // the row, surviving subsequent re-renders.
 const includedPolicyKeys = new Set();
+const everSeenPolicyKeys = new Set();
+const policyBonusOverrides = new Map(); // key -> { excludeWelcomeBonus, excludeAnnualPremiumBonus }
+let editingPolicyKey = null;
 
 function groupKey(grp) {
   return grp.key || (grp.recognised
     ? `auto::${grp.product}::${grp.variation}`
     : `manual::${grp.policyName || 'Unknown'}`);
+}
+
+function policyAdjustmentKey(item, raw, recognised = null) {
+  const isRecognised = recognised ?? !!(raw.product && raw.variation
+    && PRODUCTS[raw.product]?.variations?.[raw.variation]);
+  return isRecognised
+    ? `auto::${raw.product}::${raw.variation}::${policyKey(item, raw)}`
+    : `manual::${raw.policyName || 'Unknown'}::${policyKey(item, raw)}`;
+}
+
+function effectiveBonusSelection(item, raw, meta = policyMetaFor(raw)) {
+  const recognised = !!(raw.product && raw.variation
+    && PRODUCTS[raw.product]?.variations?.[raw.variation]);
+  const key = policyAdjustmentKey(item, raw, recognised);
+  const included = recognised && includedPolicyKeys.has(key);
+  const override = policyBonusOverrides.get(key) || null;
+  const excludeWelcomeBonus = included && (
+    override ? !!override.excludeWelcomeBonus : !!excludeWelcomeEl.checked
+  );
+  const excludeAnnualPremiumBonus = included && meta.annualPremiumRate > 0 && (
+    override ? !!override.excludeAnnualPremiumBonus : !!excludeAnnualEl.checked
+  );
+  return {
+    key,
+    recognised,
+    included,
+    override,
+    followsGlobal: !override,
+    excludeWelcomeBonus,
+    excludeAnnualPremiumBonus,
+  };
+}
+
+function describeSelection(selection) {
+  if (!selection.included) return 'not applied';
+  if (selection.excludeWelcomeBonus && selection.excludeAnnualPremiumBonus) return 'welcome + annual';
+  if (selection.excludeWelcomeBonus) return 'welcome only';
+  if (selection.excludeAnnualPremiumBonus) return 'annual only';
+  return 'no exclusions';
+}
+
+function renderPolicyOverrideEditor(key, meta, selection) {
+  const custom = selection.override || {
+    excludeWelcomeBonus: !!excludeWelcomeEl.checked,
+    excludeAnnualPremiumBonus: !!excludeAnnualEl.checked && meta.annualPremiumRate > 0,
+  };
+  const annualDisabled = meta.annualPremiumRate <= 0;
+  const annualHint = meta.isMonthlyInvestReadyIII
+    ? 'Monthly-pay InvestReady (III): Annual Premium Bonus does not apply.'
+    : 'No published Annual Premium Bonus applies to this policy.';
+  return `
+    <form class="policy-override-editor" data-policy-editor data-group-key="${esc(key)}">
+      <div class="editor-mode">
+        <label>
+          <input type="radio" name="mode" value="global" ${selection.override ? '' : 'checked'}>
+          <span>Follow global switches</span>
+        </label>
+        <label>
+          <input type="radio" name="mode" value="custom" ${selection.override ? 'checked' : ''}>
+          <span>Custom for this policy</span>
+        </label>
+      </div>
+      <div class="editor-checks" aria-label="Custom bonus exclusions for this policy">
+        <label class="editor-check">
+          <input type="checkbox" name="excludeWelcomeBonus" ${custom.excludeWelcomeBonus ? 'checked' : ''}>
+          <span>Exclude Welcome Bonus</span>
+        </label>
+        <label class="editor-check${annualDisabled ? ' is-disabled' : ''}" title="${annualDisabled ? esc(annualHint) : ''}">
+          <input type="checkbox" name="excludeAnnualPremiumBonus" ${custom.excludeAnnualPremiumBonus ? 'checked' : ''} ${annualDisabled ? 'disabled' : ''}>
+          <span>Exclude Annual Premium Bonus</span>
+        </label>
+      </div>
+      <div class="editor-actions">
+        <button type="submit">Apply</button>
+        <button type="button" data-reset-policy>Reset to global</button>
+        <button type="button" data-cancel-policy>Cancel</button>
+      </div>
+    </form>
+  `;
 }
 
 function renderDetectedSummary() {
@@ -373,11 +454,17 @@ function renderDetectedSummary() {
       : esc(grp.policyName || 'Unrecognised product');
     const repPolicy = grp.policies[0];
     const meta = policyMetaFor(repPolicy);
-    const pill = !grp.recognised
+    const selection = effectiveBonusSelection(grp.item, repPolicy, meta);
+    const basePill = !grp.recognised
       ? '<span class="pill manual">MANUAL</span>'
       : meta.isMonthlyInvestReadyIII
         ? '<span class="pill monthly" title="Monthly-pay detected: Annual Premium Bonus does not apply">MONTHLY</span>'
         : '<span class="pill detected">DETECTED</span>';
+    const customPill = selection.override
+      ? '<span class="pill custom" title="This policy has its own bonus exclusion settings">CUSTOM</span>'
+      : '';
+    const pill = `<span class="status-cell">${basePill}${customPill}</span>`;
+    const adjustmentSummary = `${selection.override ? 'custom' : 'global'}: ${describeSelection(selection)}`;
     const rates = grp.recognised
       ? `${(meta.welcomeRate * 100).toFixed(1)}% · ${
           meta.isMonthlyInvestReadyIII
@@ -385,11 +472,16 @@ function renderDetectedSummary() {
             : `${(meta.annualPremiumRate * 100).toFixed(1)}%`
         }`
       : '<span class="none">no published bonus</span>';
+    const ratesWithSummary = grp.recognised
+      ? `${rates}<span class="adjustment-summary">${esc(adjustmentSummary)}</span>`
+      : rates;
     const policyShort = repPolicy.policyNumber ? repPolicy.policyNumber.slice(-4) : String(grp.policies.length);
+    const isEditing = editingPolicyKey === key && grp.recognised;
+    const editor = isEditing ? renderPolicyOverrideEditor(key, meta, selection) : '';
     const displayTitle = `${esc(repPolicy.customerName || 'Client')} · ${title}`;
 
     return `
-      <li class="detected-summary-row${disabled ? ' is-disabled' : ''}" data-group-key="${esc(key)}">
+      <li class="detected-summary-row${disabled ? ' is-disabled' : ''}${selection.override ? ' is-custom' : ''}${isEditing ? ' is-editing' : ''}" data-group-key="${esc(key)}">
         <label class="apply-check" title="${disabled ? 'No published bonus — toggling has no effect on this policy' : 'Apply the global bonus toggles to this policy'}">
           <input type="checkbox" data-apply-group ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
           <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span>
@@ -397,7 +489,9 @@ function renderDetectedSummary() {
         <span class="count" title="Policy ${esc(repPolicy.policyNumber || '')}">${esc(policyShort)}</span>
         <span class="name" title="${displayTitle}">${displayTitle}</span>
         ${pill}
-        <span class="rates">${rates}</span>
+        <span class="rates">${ratesWithSummary}</span>
+        <button type="button" class="edit-policy" data-edit-policy ${disabled ? 'disabled' : ''} aria-expanded="${isEditing ? 'true' : 'false'}">Edit</button>
+        ${editor}
       </li>
     `;
   }).join('');
@@ -413,67 +507,117 @@ function renderDetectedSummary() {
         <span class="name" role="columnheader">Product</span>
         <span class="status-col" role="columnheader">Status</span>
         <span class="rates" role="columnheader">Welcome · Annual</span>
+        <span class="edit-col" role="columnheader">Edit</span>
       </li>
       ${rows}
     </ul>
   `;
 }
 
-// Tracks which policy keys we've EVER auto-included. Without this, unticking
-// a policy and then dropping another PDF that lands in the same product would
-// re-tick it (because renderDetectedSummary "first-time" semantics would
-// fire again).
-const everSeenPolicyKeys = new Set();
-
 // Event delegation for the per-row apply checkboxes. Toggling rebuilds the
 // inclusion set and triggers a fresh render of every policy in the batch.
 detectedSummaryEl.addEventListener('change', (e) => {
   const t = e.target;
-  if (!t.matches('input[data-apply-group]')) return;
+  if (!t.matches('input[data-apply-group]')) {
+    const form = t.closest('[data-policy-editor]');
+    if (form && t.matches('input[type="checkbox"]')) {
+      const customMode = form.querySelector('input[name="mode"][value="custom"]');
+      if (customMode) customMode.checked = true;
+    }
+    return;
+  }
   const row = t.closest('.detected-summary-row');
   const key = row?.dataset.groupKey;
   if (!key) return;
   if (t.checked) includedPolicyKeys.add(key);
   else includedPolicyKeys.delete(key);
+  renderDetectedSummary();
   refreshBonusTotals();
   scheduleRerender();
 });
 
-// Per-policy options for the deriver. Two filters compose:
-//   1. Global toggle: which BONUS TYPE to exclude (welcome, annual, or both)
-//   2. Per-row Apply checkbox: which PRODUCT GROUPS those toggles apply to
-// A policy receives an exclusion only when both axes line up. Anything
-// outside the included-policies set falls through with an empty options
-// object → derive() returns the policy's PDF-stated values unchanged.
+detectedSummaryEl.addEventListener('click', (e) => {
+  const editBtn = e.target.closest('[data-edit-policy]');
+  if (editBtn) {
+    const row = editBtn.closest('.detected-summary-row');
+    const key = row?.dataset.groupKey;
+    if (!key) return;
+    editingPolicyKey = editingPolicyKey === key ? null : key;
+    renderDetectedSummary();
+    return;
+  }
+
+  const cancelBtn = e.target.closest('[data-cancel-policy]');
+  if (cancelBtn) {
+    editingPolicyKey = null;
+    renderDetectedSummary();
+    return;
+  }
+
+  const resetBtn = e.target.closest('[data-reset-policy]');
+  if (resetBtn) {
+    const form = resetBtn.closest('[data-policy-editor]');
+    const key = form?.dataset.groupKey;
+    if (!key) return;
+    policyBonusOverrides.delete(key);
+    editingPolicyKey = null;
+    renderDetectedSummary();
+    refreshBonusTotals();
+    scheduleRerender();
+  }
+});
+
+detectedSummaryEl.addEventListener('submit', (e) => {
+  const form = e.target.closest('[data-policy-editor]');
+  if (!form) return;
+  e.preventDefault();
+  const key = form.dataset.groupKey;
+  if (!key) return;
+  const data = new FormData(form);
+  if (data.get('mode') === 'custom') {
+    policyBonusOverrides.set(key, {
+      excludeWelcomeBonus: data.get('excludeWelcomeBonus') === 'on',
+      excludeAnnualPremiumBonus: data.get('excludeAnnualPremiumBonus') === 'on',
+    });
+  } else {
+    policyBonusOverrides.delete(key);
+  }
+  editingPolicyKey = null;
+  renderDetectedSummary();
+  refreshBonusTotals();
+  scheduleRerender();
+});
+
+// Per-policy options for the deriver. Policies follow the global welcome /
+// annual toggles by default, unless the row has a custom override. The Apply
+// checkbox still acts as a hard opt-out for that policy.
 function bonusOptionsForPolicy(item, raw) {
-  const recognised = !!(raw.product && raw.variation && PRODUCTS[raw.product]?.variations?.[raw.variation]);
-  const key = recognised
-    ? `auto::${raw.product}::${raw.variation}::${policyKey(item, raw)}`
-    : `manual::${raw.policyName || 'Unknown'}::${policyKey(item, raw)}`;
-  if (!includedPolicyKeys.has(key)) {
+  const selection = effectiveBonusSelection(item, raw);
+  if (!selection.included) {
     return {};  // policy opted-out → no bonus exclusion regardless of global toggles
   }
   return {
-    excludeWelcomeBonus: excludeWelcomeEl.checked,
-    excludeAnnualPremiumBonus: excludeAnnualEl.checked,
+    excludeWelcomeBonus: selection.excludeWelcomeBonus,
+    excludeAnnualPremiumBonus: selection.excludeAnnualPremiumBonus,
   };
 }
 
 // Wire the global toggles. The handlers re-render the entire batch with
 // fresh per-policy rates picked up from the rate tables.
 excludeWelcomeEl.addEventListener('change', () => {
+  renderDetectedSummary();
   refreshBonusTotals();
   scheduleRerender();
 });
 excludeAnnualEl.addEventListener('change', () => {
+  renderDetectedSummary();
   refreshBonusTotals();
   scheduleRerender();
 });
 
 function refreshBonusTotals() {
-  // Right-side hint on each toggle row. Counts policies that BOTH have a
-  // published bonus rate AND belong to a group the user has ticked Apply
-  // for — those are the policies the global toggle will affect.
+  // Right-side hint on each toggle row. Counts the effective exclusions
+  // after global switches and per-policy overrides have both been applied.
   const policies = allParsedPolicies();
   if (!policies.length) {
     welcomeTotalEl.textContent = '—';
@@ -482,21 +626,17 @@ function refreshBonusTotals() {
   }
   let welcomable = 0, annualable = 0;
   for (const { item, raw } of policies) {
-    const recognised = !!(raw.product && raw.variation && PRODUCTS[raw.product]?.variations?.[raw.variation]);
-    const key = recognised
-      ? `auto::${raw.product}::${raw.variation}::${policyKey(item, raw)}`
-      : `manual::${raw.policyName || 'Unknown'}::${policyKey(item, raw)}`;
-    if (!includedPolicyKeys.has(key)) continue;
     const meta = policyMetaFor(raw);
-    if (meta.welcomeRate > 0) welcomable += 1;
-    if (meta.annualPremiumRate > 0) annualable += 1;
+    const selection = effectiveBonusSelection(item, raw, meta);
+    if (selection.excludeWelcomeBonus && meta.welcomeRate > 0) welcomable += 1;
+    if (selection.excludeAnnualPremiumBonus && meta.annualPremiumRate > 0) annualable += 1;
   }
   welcomeTotalEl.textContent = describeApplied(welcomable, policies.length);
   annualTotalEl.textContent = describeApplied(annualable, policies.length);
 }
 
 function describeApplied(eligible, total) {
-  if (eligible === 0) return 'no eligible policies';
+  if (eligible === 0) return 'not applied';
   if (eligible === total) return `applied to all ${total} polic${total === 1 ? 'y' : 'ies'}`;
   return `applied to ${eligible} of ${total} polic${total === 1 ? 'y' : 'ies'}`;
 }
