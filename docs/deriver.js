@@ -254,6 +254,8 @@ function countAnniversariesPaid(issueDate, reportDate) {
 // PDF's structure (premium paid by anniversary) leans that way too. The
 // monthly inference only wins when it's BOTH very clean (≤ $5 from a $100
 // multiple) AND meaningfully cleaner than the annual one (by > $5).
+// Use completed monthly payment intervals here; the display month count
+// rounds partial months up, which is too generous for payment counts.
 //
 // Genuine ambiguity exists when totalPaid happens to equal `annual × N` for
 // both interpretations — i.e. when monthlyPayments is itself a multiple of
@@ -270,7 +272,7 @@ function inferAnnualPremium(totalPaid, issueDate, reportDate, anniversaries) {
 
   const annualEst = anniversaries > 0 ? totalPaid / anniversaries : 0;
 
-  const monthsElapsed = monthsBetween(issueDate, reportDate);
+  const monthsElapsed = fullMonthsBetween(issueDate, reportDate);
   const monthlyPayments = monthsElapsed + 1;
   const monthlyAnnualEst = monthlyPayments > 0
     ? (totalPaid / monthlyPayments) * 12
@@ -315,6 +317,13 @@ function inferAnnualPremium(totalPaid, issueDate, reportDate, anniversaries) {
 
 function residualFromHundred(v) {
   return Math.abs(v - Math.round(v / 100) * 100);
+}
+
+function fullMonthsBetween(start, end) {
+  if (end < start) return 0;
+  let months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+  if (end.getDate() < start.getDate()) months -= 1;
+  return Math.max(0, months);
 }
 
 function daysBetween(start, end) {

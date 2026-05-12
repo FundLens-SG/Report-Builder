@@ -137,6 +137,8 @@ def infer_annual_premium(
     so we pick whichever interpretation lands closer to a clean $100 multiple.
     Monthly only wins when its residual is BOTH <= $5 AND > $5 better than
     annual's. Bias toward annual on near-ties (more common case).
+    Use completed monthly payment intervals here; the display month count
+    rounds partial months up, which is too generous for payment counts.
 
     Genuine ambiguity exists at 12 / 24 / 36-month boundaries — at those
     moments an annual-pay $10K and a monthly-pay $833.33 client both produce
@@ -152,7 +154,7 @@ def infer_annual_premium(
 
     annual_est = total_paid / anniversaries if anniversaries > 0 else 0.0
 
-    months_elapsed = _months_between(issue_date, report_date)
+    months_elapsed = _full_months_between(issue_date, report_date)
     monthly_payments = months_elapsed + 1
     monthly_annual_est = (
         (total_paid / monthly_payments) * 12 if monthly_payments > 0 else 0.0
@@ -195,6 +197,14 @@ def infer_annual_premium(
 
 def _residual_from_hundred(v: float) -> float:
     return abs(v - round(v / 100) * 100)
+
+
+def _full_months_between(start: date, end: date) -> int:
+    """Completed monthly payment intervals between two dates."""
+    if end < start:
+        return 0
+    rd = relativedelta(end, start)
+    return max(0, rd.years * 12 + rd.months)
 
 
 def _int_from(text: str, pattern: str) -> int | None:

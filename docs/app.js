@@ -6,7 +6,7 @@ import { parsePdf } from './parser.js';
 import { derive } from './deriver.js';
 import { renderToPng } from './snapshot.js';
 import { buildFilename } from './naming.js';
-import { PRODUCTS, lookupBonusRates } from './bonus.js';
+import { PRODUCTS } from './bonus.js';
 
 // ---- DOM lookups ------------------------------------------------------------
 
@@ -273,14 +273,20 @@ function allParsedPolicies() {
 // exactly what the rates are per variant so the user can see what each
 // click is going to do.
 
-function annualPremiumFor(raw) {
-  return derive(raw, {}).annualPremium;
+function policyMetaFor(raw) {
+  const d = derive(raw, {});
+  const recognised = !!(raw.product && raw.variation
+    && PRODUCTS[raw.product]?.variations?.[raw.variation]);
+  return {
+    recognised,
+    welcomeRate: d.welcomeBonusRate || 0,
+    annualPremiumRate: d.annualPremiumBonusRate || 0,
+  };
 }
 
-// Group policies by (product, variation) for the read-only summary panel.
-// Recognised products → "Manulife InvestReady (III) · 13 Years Flexi 10" with
-// rates. Unrecognised → grouped by policyName so distinct ones (Manulink vs
-// SRS) don't collapse together.
+// Build one row per uploaded policy for the read-only summary panel.
+// Recognised policies show their own auto-detected rates; this prevents two
+// similar PDFs in different bonus tiers from being collapsed into one row.
 function detectedGroups() {
   const groups = new Map();
   for (const item of queue) {
@@ -289,10 +295,11 @@ function detectedGroups() {
       const recognised = !!(raw.product && raw.variation
         && PRODUCTS[raw.product]?.variations?.[raw.variation]);
       const key = recognised
-        ? `auto::${raw.product}::${raw.variation}`
-        : `manual::${raw.policyName || 'Unknown'}`;
+        ? `auto::${raw.product}::${raw.variation}::${policyKey(item, raw)}`
+        : `manual::${raw.policyName || 'Unknown'}::${policyKey(item, raw)}`;
       if (!groups.has(key)) {
         groups.set(key, {
+          key,
           recognised,
           product: raw.product,
           variation: raw.variation,
@@ -306,18 +313,18 @@ function detectedGroups() {
   return groups;
 }
 
-// Per-group "apply globals" set. A group's policies inherit the global
+// Per-policy "apply globals" set. A policy inherits the global
 // Exclude-Welcome / Exclude-Annual-Premium toggles only if its key is in
-// this set. MANUAL groups never enter the set (their auto rates are 0 % so
-// applying or not has the same effect — a no-op). DETECTED groups join the
+// this set. MANUAL rows never enter the set (their auto rates are 0 % so
+// applying or not has the same effect — a no-op). DETECTED rows join the
 // set the first time they're seen and stay there until the user unchecks
 // the row, surviving subsequent re-renders.
-const includedGroupKeys = new Set();
+const includedPolicyKeys = new Set();
 
 function groupKey(grp) {
-  return grp.recognised
+  return grp.key || (grp.recognised
     ? `auto::${grp.product}::${grp.variation}`
-    : `manual::${grp.policyName || 'Unknown'}`;
+    : `manual::${grp.policyName || 'Unknown'}`);
 }
 
 function renderDetectedSummary() {
@@ -343,16 +350,16 @@ function renderDetectedSummary() {
   const rows = groups.map(grp => {
     const key = groupKey(grp);
     // Auto-include any newly seen DETECTED group on first render.
-    if (grp.recognised && !includedGroupKeys.has(key)) {
+    if (grp.recognised && !includedPolicyKeys.has(key)) {
       // Only seed the set when it's the FIRST time we've ever seen this key
       // — distinct from "user unticked it then more PDFs landed". We track
       // first-seen via a separate ever-seen Set.
-      if (!everSeenGroupKeys.has(key)) {
-        includedGroupKeys.add(key);
+      if (!everSeenPolicyKeys.has(key)) {
+        includedPolicyKeys.add(key);
       }
-      everSeenGroupKeys.add(key);
+      everSeenPolicyKeys.add(key);
     }
-    const checked = grp.recognised && includedGroupKeys.has(key);
+    const checked = grp.recognised && includedPolicyKeys.has(key);
     const disabled = !grp.recognised;
 
     const title = grp.recognised
@@ -362,12 +369,12 @@ function renderDetectedSummary() {
       ? '<span class="pill detected">DETECTED</span>'
       : '<span class="pill manual">MANUAL</span>';
     const repPolicy = grp.policies[0];
-    const auto = grp.recognised
-      ? lookupBonusRates(grp.product, grp.variation, annualPremiumFor(repPolicy))
-      : { welcomeRate: 0, annualPremiumRate: 0, recognised: false };
+    const meta = policyMetaFor(repPolicy);
     const rates = grp.recognised
-      ? `${(auto.welcomeRate * 100).toFixed(1)}% · ${(auto.annualPremiumRate * 100).toFixed(1)}%`
+      ? `${(meta.welcomeRate * 100).toFixed(1)}% · ${(meta.annualPremiumRate * 100).toFixed(1)}%`
       : '<span class="none">no published bonus</span>';
+    const policyShort = repPolicy.policyNumber ? repPolicy.policyNumber.slice(-4) : String(grp.policies.length);
+    const displayTitle = `${esc(repPolicy.customerName || 'Client')} · ${title}`;
 
     return `
       <li class="detected-summary-row${disabled ? ' is-disabled' : ''}" data-group-key="${esc(key)}">
@@ -375,8 +382,8 @@ function renderDetectedSummary() {
           <input type="checkbox" data-apply-group ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
           <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span>
         </label>
-        <span class="count">${grp.policies.length}</span>
-        <span class="name">${title}</span>
+        <span class="count" title="Policy ${esc(repPolicy.policyNumber || '')}">${esc(policyShort)}</span>
+        <span class="name" title="${displayTitle}">${displayTitle}</span>
         ${pill}
         <span class="rates">${rates}</span>
       </li>
@@ -385,12 +392,12 @@ function renderDetectedSummary() {
 
   detectedSummaryEl.innerHTML = `
     <div class="detected-summary-head">
-      <span class="title">Detected products · ${totalPolicies} polic${totalPolicies === 1 ? 'y' : 'ies'} total</span>
+      <span class="title">Detected policies · ${totalPolicies} polic${totalPolicies === 1 ? 'y' : 'ies'} total</span>
     </div>
-    <ul class="detected-summary-list" role="table" aria-label="Detected products">
+    <ul class="detected-summary-list" role="table" aria-label="Detected policies">
       <li class="detected-summary-row is-header" role="row">
         <span class="apply-col" role="columnheader">Apply</span>
-        <span class="count" role="columnheader">Policies</span>
+        <span class="count" role="columnheader">Policy</span>
         <span class="name" role="columnheader">Product</span>
         <span class="status-col" role="columnheader">Status</span>
         <span class="rates" role="columnheader">Welcome · Annual</span>
@@ -400,11 +407,11 @@ function renderDetectedSummary() {
   `;
 }
 
-// Tracks which group keys we've EVER auto-included. Without this, unticking
-// a group and then dropping another PDF that lands in the same group would
+// Tracks which policy keys we've EVER auto-included. Without this, unticking
+// a policy and then dropping another PDF that lands in the same product would
 // re-tick it (because renderDetectedSummary "first-time" semantics would
 // fire again).
-const everSeenGroupKeys = new Set();
+const everSeenPolicyKeys = new Set();
 
 // Event delegation for the per-row apply checkboxes. Toggling rebuilds the
 // inclusion set and triggers a fresh render of every policy in the batch.
@@ -414,8 +421,8 @@ detectedSummaryEl.addEventListener('change', (e) => {
   const row = t.closest('.detected-summary-row');
   const key = row?.dataset.groupKey;
   if (!key) return;
-  if (t.checked) includedGroupKeys.add(key);
-  else includedGroupKeys.delete(key);
+  if (t.checked) includedPolicyKeys.add(key);
+  else includedPolicyKeys.delete(key);
   refreshBonusTotals();
   scheduleRerender();
 });
@@ -424,15 +431,15 @@ detectedSummaryEl.addEventListener('change', (e) => {
 //   1. Global toggle: which BONUS TYPE to exclude (welcome, annual, or both)
 //   2. Per-row Apply checkbox: which PRODUCT GROUPS those toggles apply to
 // A policy receives an exclusion only when both axes line up. Anything
-// outside the included-groups set falls through with an empty options
+// outside the included-policies set falls through with an empty options
 // object → derive() returns the policy's PDF-stated values unchanged.
-function bonusOptionsForPolicy(raw) {
+function bonusOptionsForPolicy(item, raw) {
   const recognised = !!(raw.product && raw.variation && PRODUCTS[raw.product]?.variations?.[raw.variation]);
   const key = recognised
-    ? `auto::${raw.product}::${raw.variation}`
-    : `manual::${raw.policyName || 'Unknown'}`;
-  if (!includedGroupKeys.has(key)) {
-    return {};  // group opted-out → no bonus exclusion regardless of global toggles
+    ? `auto::${raw.product}::${raw.variation}::${policyKey(item, raw)}`
+    : `manual::${raw.policyName || 'Unknown'}::${policyKey(item, raw)}`;
+  if (!includedPolicyKeys.has(key)) {
+    return {};  // policy opted-out → no bonus exclusion regardless of global toggles
   }
   return {
     excludeWelcomeBonus: excludeWelcomeEl.checked,
@@ -462,15 +469,15 @@ function refreshBonusTotals() {
     return;
   }
   let welcomable = 0, annualable = 0;
-  for (const { raw } of policies) {
+  for (const { item, raw } of policies) {
     const recognised = !!(raw.product && raw.variation && PRODUCTS[raw.product]?.variations?.[raw.variation]);
     const key = recognised
-      ? `auto::${raw.product}::${raw.variation}`
-      : `manual::${raw.policyName || 'Unknown'}`;
-    if (!includedGroupKeys.has(key)) continue;
-    const auto = lookupBonusRates(raw.product, raw.variation, annualPremiumFor(raw));
-    if ((auto.welcomeRate || 0) > 0) welcomable += 1;
-    if ((auto.annualPremiumRate || 0) > 0) annualable += 1;
+      ? `auto::${raw.product}::${raw.variation}::${policyKey(item, raw)}`
+      : `manual::${raw.policyName || 'Unknown'}::${policyKey(item, raw)}`;
+    if (!includedPolicyKeys.has(key)) continue;
+    const meta = policyMetaFor(raw);
+    if (meta.welcomeRate > 0) welcomable += 1;
+    if (meta.annualPremiumRate > 0) annualable += 1;
   }
   welcomeTotalEl.textContent = describeApplied(welcomable, policies.length);
   annualTotalEl.textContent = describeApplied(annualable, policies.length);
@@ -512,7 +519,7 @@ async function updateAllRendered({ trigger = 'rerender' } = {}) {
   for (const { item, raw } of policies) {
     setStatus(item, 'rendering');
     try {
-      const opts = bonusOptionsForPolicy(raw);
+      const opts = bonusOptionsForPolicy(item, raw);
       const data = derive(raw, opts);
       const blob = await renderToPng(data);
       if (myToken !== renderToken) return;  // newer render started; new pass owns the toast
