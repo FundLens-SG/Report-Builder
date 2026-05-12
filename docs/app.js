@@ -281,6 +281,12 @@ function policyMetaFor(raw) {
     recognised,
     welcomeRate: d.welcomeBonusRate || 0,
     annualPremiumRate: d.annualPremiumBonusRate || 0,
+    isMonthlyInvestReadyIII: (
+      recognised
+      && raw.product === 'InvestReady (III)'
+      && d.premiumFrequency === 'monthly'
+      && !d.premiumFrequencyAmbiguous
+    ),
   };
 }
 
@@ -365,20 +371,26 @@ function renderDetectedSummary() {
     const title = grp.recognised
       ? `${PRODUCTS[grp.product].label} · ${esc(grp.variation)}`
       : esc(grp.policyName || 'Unrecognised product');
-    const pill = grp.recognised
-      ? '<span class="pill detected">DETECTED</span>'
-      : '<span class="pill manual">MANUAL</span>';
     const repPolicy = grp.policies[0];
     const meta = policyMetaFor(repPolicy);
+    const pill = !grp.recognised
+      ? '<span class="pill manual">MANUAL</span>'
+      : meta.isMonthlyInvestReadyIII
+        ? '<span class="pill monthly" title="Monthly-pay detected: Annual Premium Bonus does not apply">MONTHLY</span>'
+        : '<span class="pill detected">DETECTED</span>';
     const rates = grp.recognised
-      ? `${(meta.welcomeRate * 100).toFixed(1)}% · ${(meta.annualPremiumRate * 100).toFixed(1)}%`
+      ? `${(meta.welcomeRate * 100).toFixed(1)}% · ${
+          meta.isMonthlyInvestReadyIII
+            ? '<span class="rate-na" title="Monthly-pay InvestReady (III): Annual Premium Bonus does not apply">N/A monthly</span>'
+            : `${(meta.annualPremiumRate * 100).toFixed(1)}%`
+        }`
       : '<span class="none">no published bonus</span>';
     const policyShort = repPolicy.policyNumber ? repPolicy.policyNumber.slice(-4) : String(grp.policies.length);
     const displayTitle = `${esc(repPolicy.customerName || 'Client')} · ${title}`;
 
     return `
       <li class="detected-summary-row${disabled ? ' is-disabled' : ''}" data-group-key="${esc(key)}">
-        <label class="apply-check" title="${disabled ? 'No published bonus — toggling has no effect on these policies' : 'Apply the global bonus toggles to this group'}">
+        <label class="apply-check" title="${disabled ? 'No published bonus — toggling has no effect on this policy' : 'Apply the global bonus toggles to this policy'}">
           <input type="checkbox" data-apply-group ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
           <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span>
         </label>

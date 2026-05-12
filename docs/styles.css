@@ -656,6 +656,11 @@ body::after {
   background: var(--accent-dim);
   color: var(--accent);
 }
+.detected-summary-row .pill.monthly {
+  background: var(--amber-dim);
+  color: var(--amber);
+  border: 1px solid oklch(0.80 0.13 75 / 0.26);
+}
 .detected-summary-row .pill.manual {
   background: oklch(1 0 0 / 0.06);
   color: var(--ink-3);
@@ -674,6 +679,10 @@ body::after {
   color: var(--ink-4);
   font-style: italic;
   font-size: 11px;
+}
+.detected-summary-row .rates .rate-na {
+  color: var(--amber);
+  font-style: italic;
 }
 .bonus-row {
   display: grid;
