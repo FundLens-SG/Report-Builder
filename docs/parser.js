@@ -163,6 +163,20 @@ function parsePolicyBlock(pageTexts, pageItems, block, customer) {
     /Total Dividends Reinvested[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})/,
     /SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n\s*Total Dividends Reinvested/,
   ]);
+  // Cash that's already left the policy. Manulife's Annualised P&L formula
+  // counts both as "investment value" alongside Account Value, so we need
+  // them whenever we recompute P&L locally (e.g. bonus-exclusion adjustments).
+  // Without them, a policy that has paid out cash dividends shows a
+  // collapsed adjusted IRR — the cash that already returned to the customer
+  // stops counting as a return.
+  const totalDividendsPaidOut = grabMoneyFirst(text, [
+    /Total Dividends Paid Out\*?[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})/,
+    /SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n\s*Total Dividends Paid Out/,
+  ]);
+  const totalPartialWithdrawal = grabMoneyFirst(text, [
+    /Total Partial Withdrawal\*?[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})/,
+    /SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n\s*Total Partial Withdrawal/,
+  ]);
 
   const totalPnlPct = parseFloat(grabFirst(text, [
     /Total P&L \(%\)[ \t]+(-?[\d.]+)/,
@@ -198,6 +212,8 @@ function parsePolicyBlock(pageTexts, pageItems, block, customer) {
     annualisedPnlPct,
     totalRiderPremiums,
     totalDividendsReinvested,
+    totalDividendsPaidOut,
+    totalPartialWithdrawal,
     holdings,
     product,
     variation,

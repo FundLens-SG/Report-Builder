@@ -98,11 +98,21 @@ export function derive(raw, options = {}) {
   let totalPnlPct = raw.totalPnlPct;
   let annualisedPnlPct = raw.annualisedPnlPct;
   if (adjustmentsActive && raw.accountValue && adjustedCost > 0) {
-    totalPnlDollar = round2(raw.accountValue - adjustedCost);
-    totalPnlPct = round2((raw.accountValue / adjustedCost - 1) * 100);
+    // Mirror Manulife's own P&L formulas (per the report glossary):
+    //   value = Account value + Total partial withdrawal + Total dividends paid out
+    // Cash already returned to the customer must still count as a return.
+    // Earlier this branch used `accountValue / adjustedCost` directly, which
+    // dropped paid-out dividends — a policy with $12K of cash dividends
+    // would see its adjusted IRR collapse from ~7% to ~1% the moment any
+    // bonus exclusion was toggled.
+    const investmentValue = raw.accountValue
+      + (raw.totalPartialWithdrawal || 0)
+      + (raw.totalDividendsPaidOut || 0);
+    totalPnlDollar = round2(investmentValue - adjustedCost);
+    totalPnlPct = round2((investmentValue / adjustedCost - 1) * 100);
     const days = Math.max(1, daysBetween(issueDate, reportDate));
     annualisedPnlPct = round2(
-      (Math.pow(raw.accountValue / adjustedCost, 365 / days) - 1) * 100
+      (Math.pow(investmentValue / adjustedCost, 365 / days) - 1) * 100
     );
   }
 
@@ -179,6 +189,8 @@ export function derive(raw, options = {}) {
     annualisedPnlPct,
     totalRiderPremiums: raw.totalRiderPremiums,
     totalDividendsReinvested: raw.totalDividendsReinvested,
+    totalDividendsPaidOut: raw.totalDividendsPaidOut || 0,
+    totalPartialWithdrawal: raw.totalPartialWithdrawal || 0,
     riskProfile: raw.riskProfile,
     ckaStatus: raw.ckaStatus,
     ckaExpiry: raw.ckaExpiry,

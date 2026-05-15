@@ -333,6 +333,12 @@ function investmentJourney(d) {
           ${firstYearBonusRow}
           ${frequencyDisclaimerRow}
           <div style="color: #888780;">Reinvested dividends: <span style="color: #5f5e5a;">S$${fmt2(d.totalDividendsReinvested)}</span></div>
+          ${d.totalDividendsPaidOut > 0
+            ? `<div style="color: #888780;">Dividends paid out: <span style="color: #5f5e5a;">S$${fmt2(d.totalDividendsPaidOut)}</span></div>`
+            : ''}
+          ${d.totalPartialWithdrawal > 0
+            ? `<div style="color: #888780;">Partial withdrawals: <span style="color: #5f5e5a;">S$${fmt2(d.totalPartialWithdrawal)}</span></div>`
+            : ''}
         </div>
       </div>
       <div style="text-align: right;">
