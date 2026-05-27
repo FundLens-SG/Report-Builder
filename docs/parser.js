@@ -275,7 +275,33 @@ const NUMERIC_RE = /^-?[\d,]+\.\d+(?:\s*\d+)?$/;
 function parseHoldingsFromPageItems(items) {
   if (!items?.length) return [];
   const rows = clusterIntoRows(items);
-  return extractHoldingsFromRows(rows);
+  const subAssetX = findSubAssetColumnX(rows);
+  return extractHoldingsFromRows(rows, subAssetX);
+}
+
+// The Asset Class / Sub-Asset Class columns are TEXT columns with no numeric
+// anchor of their own, so we can't infer the boundary from the data row alone.
+// Without a header anchor we fell back to a fixed 25 px x-gap heuristic, which
+// silently dropped any fund whose asset class spanned 3+ words (e.g. "Fixed
+// Income Global") because every inter-word gap was <25 px and the whole row
+// collapsed into a single column → `clusters.length < 2` → row discarded.
+// Anchoring on the header's "Sub-Asset" token gives us a stable column boundary
+// that doesn't depend on how wide the asset-class text happens to be.
+//
+// PDF.js fragments text at hyphens, so "Sub-Asset" arrives as either two
+// tokens ["Sub-", "Asset"] or one ["Sub-Asset"]. We match all three forms
+// ("Sub", "Sub-", "Sub-Asset"). To avoid latching onto a data-row substring,
+// we require the matched row to also contain a preceding "Asset" token — that
+// only happens in the column-header row that reads "Asset Class Sub-Asset
+// Class …".
+function findSubAssetColumnX(rows) {
+  for (const row of rows) {
+    const sub = row.find(c => /^Sub-?(Asset)?$/i.test(c.text));
+    if (!sub) continue;
+    const hasLeadingAsset = row.some(c => c.text === 'Asset' && c.x < sub.x);
+    if (hasLeadingAsset) return sub.x;
+  }
+  return null;
 }
 
 function clusterIntoRows(items) {
@@ -343,7 +369,7 @@ function mergeSplitNumbersOnce(row) {
   return out;
 }
 
-function extractHoldingsFromRows(rows) {
+function extractHoldingsFromRows(rows, subAssetX) {
   const out = [];
   let pendingHeader = null;
 
@@ -374,7 +400,7 @@ function extractHoldingsFromRows(rows) {
         }
       }
 
-      const holding = buildHoldingFromRow(pendingHeader, row, wrapTexts);
+      const holding = buildHoldingFromRow(pendingHeader, row, wrapTexts, subAssetX);
       if (holding) out.push(holding);
       pendingHeader = null;
     }
@@ -382,7 +408,7 @@ function extractHoldingsFromRows(rows) {
   return out;
 }
 
-function buildHoldingFromRow(header, row, wrapTexts) {
+function buildHoldingFromRow(header, row, wrapTexts, subAssetX) {
   const nums = row.filter(c => NUMERIC_RE.test(c.text)).sort((a, b) => a.x - b.x);
   if (nums.length < 5) return null;
 
@@ -396,9 +422,43 @@ function buildHoldingFromRow(header, row, wrapTexts) {
     .map(c => ({ ...c }));
   const allTexts = [...dataTexts, ...wrapTexts.filter(c => c.x < firstNumX - 5)];
   if (allTexts.length < 2) return null;
-
-  // Cluster words into columns by x-proximity (gap > 25px starts a new column).
   allTexts.sort((a, b) => a.x - b.x);
+
+  const groupTexts = subAssetX != null
+    ? splitByAnchor(allTexts, subAssetX)
+    : splitByGap(allTexts);
+  if (!groupTexts) return null;
+
+  return {
+    fundFullName: header.fullName,
+    ticker: header.ticker,
+    assetClass: groupTexts[0],
+    subAssetClass: groupTexts[1],
+    fundValue,
+    pnlDollar,
+    pnlPct,
+  };
+}
+
+// Header-anchored split: anything left of the Sub-Asset Class column header's x
+// is Asset Class, anything from there up to the first numeric is Sub-Asset
+// Class. Small (-2 px) tolerance absorbs PDF.js sub-pixel drift so an item
+// starting fractionally before the anchor still lands in the right column.
+function splitByAnchor(allTexts, subAssetX) {
+  const assetItems = allTexts.filter(t => t.x < subAssetX - 2);
+  const subAssetItems = allTexts.filter(t => t.x >= subAssetX - 2);
+  if (!assetItems.length || !subAssetItems.length) return null;
+  return [
+    cleanupColumnText(assetItems.map(t => t.text).join(' ')),
+    cleanupColumnText(subAssetItems.map(t => t.text).join(' ')),
+  ];
+}
+
+// Legacy gap-based fallback used only when the header anchor can't be located
+// (e.g. a re-laid-out PDF where the "Sub-Asset" token doesn't appear). Splits
+// at the first inter-word gap >25 px. This is the heuristic that silently
+// dropped Fixed Income Global rows before the anchor was added.
+function splitByGap(allTexts) {
   const clusters = [];
   for (const t of allTexts) {
     const last = clusters[clusters.length - 1];
@@ -410,21 +470,10 @@ function buildHoldingFromRow(header, row, wrapTexts) {
     }
   }
   if (clusters.length < 2) return null;
-
-  const groupTexts = clusters.map(c => {
+  return clusters.map(c => {
     c.items.sort((a, b) => (b.y - a.y) || (a.x - b.x));
     return cleanupColumnText(c.items.map(it => it.text).join(' '));
   });
-
-  return {
-    fundFullName: header.fullName,
-    ticker: header.ticker,
-    assetClass: groupTexts[0],
-    subAssetClass: groupTexts[1],
-    fundValue,
-    pnlDollar,
-    pnlPct,
-  };
 }
 
 function cleanupColumnText(s) {
