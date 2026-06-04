@@ -15,7 +15,7 @@ from .parser import Holding, RawReport
 
 COLORS = ["#0F6E56", "#185FA5", "#D85A30", "#534AB7", "#BA7517", "#0C447C", "#993556"]
 
-ASSET_CLASS_LABELS = {
+SUB_ASSET_CLASS_LABELS = {
     "Global Equity": "Global equity",
     "Asia Equity": "Asia equity",
     "US Equity": "US equity",
@@ -32,24 +32,29 @@ EQUITY_KEYWORDS = ("equity",)
 
 
 def derive(raw: RawReport) -> dict[str, Any]:
-    flexi_term = _int_from(raw.policy_name, r"Flexi\s+(\d+)") or 10
-    policy_term_years = _int_from(raw.policy_name, r"(\d+)\s+Years?\s+Flexi") or flexi_term
+    is_single_premium = _is_single_premium_policy(raw.policy_name)
+    flexi_term = 0 if is_single_premium else (_int_from(raw.policy_name, r"Flexi\s+(\d+)") or 10)
+    policy_term_years = None if is_single_premium else (_int_from(raw.policy_name, r"(\d+)\s+Years?\s+Flexi") or flexi_term)
 
     issue_date = _parse_dmy(raw.policy_issue_date)
     report_date = parse_date(raw.report_date).date()
 
     months_invested = _months_between(issue_date, report_date)
-    premiums_paid_count = count_anniversaries_paid(issue_date, report_date)
-    inferred = infer_annual_premium(
-        raw.policy_investment_cost,
-        issue_date,
-        report_date,
-        premiums_paid_count,
+    premiums_paid_count = 1 if is_single_premium else count_anniversaries_paid(issue_date, report_date)
+    inferred = (
+        {"annual_premium": raw.policy_investment_cost, "frequency": "single", "ambiguous": False}
+        if is_single_premium
+        else infer_annual_premium(
+            raw.policy_investment_cost,
+            issue_date,
+            report_date,
+            premiums_paid_count,
+        )
     )
     annual_premium = inferred["annual_premium"]
     premium_frequency = inferred["frequency"]                # 'monthly' | 'annual'
     premium_frequency_ambiguous = inferred["ambiguous"]
-    premiums_remaining = max(0, flexi_term - premiums_paid_count)
+    premiums_remaining = 0 if is_single_premium else max(0, flexi_term - premiums_paid_count)
 
     # capital_pct can exceed 100 when account < cost (a loss).
     # Clamp the visual representation to [0, 100] so the progress bar fills
@@ -87,10 +92,17 @@ def derive(raw: RawReport) -> dict[str, Any]:
         "annualised_pnl_pct": raw.annualised_pnl_pct,
         "total_rider_premiums": raw.total_rider_premiums,
         "total_dividends_reinvested": raw.total_dividends_reinvested,
+        "total_dividends_paid_out": raw.total_dividends_paid_out,
+        "total_partial_withdrawal": raw.total_partial_withdrawal,
         "risk_profile": raw.risk_profile,
+        "risk_profile_expiry": raw.risk_profile_expiry,
+        "risk_profile_expiry_pretty": _pretty_date(raw.risk_profile_expiry),
+        "risk_profile_expired": _is_expired_dmy(raw.risk_profile_expiry, report_date),
         "cka_status": raw.cka_status,
         "cka_expiry": raw.cka_expiry,
         "cka_expiry_pretty": _pretty_date(raw.cka_expiry),
+        "cka_expired": _is_expired_dmy(raw.cka_expiry, report_date),
+        "is_single_premium": is_single_premium,
         "flexi_term": flexi_term,
         "policy_term_years": policy_term_years,
         "months_invested": months_invested,
@@ -247,6 +259,19 @@ def _prettify_policy_name(name: str) -> str:
     return re.sub(r"\(III\)\s+", "(III) — ", name or "")
 
 
+def _is_single_premium_policy(policy_name: str) -> bool:
+    return bool(re.search(r"Manulink\s+Investor\s*\(II\)\s*-\s*SRS", policy_name or "", re.IGNORECASE))
+
+
+def _is_expired_dmy(s: str, report_date: date) -> bool:
+    if not s:
+        return False
+    try:
+        return _parse_dmy(s) < report_date
+    except (ValueError, TypeError):
+        return False
+
+
 def _enrich_holdings(holdings: list[Holding], account_value: float) -> list[dict]:
     items = sorted(
         (asdict(h) for h in holdings),
@@ -257,7 +282,7 @@ def _enrich_holdings(holdings: list[Holding], account_value: float) -> list[dict
         h["allocation_pct"] = (h["fund_value"] / account_value * 100) if account_value else 0.0
         h["color"] = COLORS[i % len(COLORS)]
         h["display_name"] = shorten_fund_name(h["fund_full_name"])
-        h["asset_class_label"] = ASSET_CLASS_LABELS.get(h["sub_asset_class"], h["sub_asset_class"])
+        h["sub_asset_class_label"] = SUB_ASSET_CLASS_LABELS.get(h["sub_asset_class"], h["sub_asset_class"])
     return items
 
 

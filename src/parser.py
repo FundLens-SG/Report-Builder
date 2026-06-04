@@ -39,7 +39,10 @@ class RawReport:
     annualised_pnl_pct: float
     total_rider_premiums: float
     total_dividends_reinvested: float
+    total_dividends_paid_out: float
+    total_partial_withdrawal: float
     risk_profile: str
+    risk_profile_expiry: str
     cka_status: str
     cka_expiry: str
     holdings: list[Holding] = field(default_factory=list)
@@ -137,6 +140,10 @@ def _parse_customer_level(page1_text: str) -> dict:
         page1_text,
         r"Customer Knowledge Assessment[\s\S]*?\(Expiry date:\s+(\d{2}/\d{2}/\d{4})\)",
     )
+    risk_profile_expiry = _grab(
+        page1_text,
+        r"Risk Profile Questionnaire[\s\S]*?\(Expiry date:\s+(\d{2}/\d{2}/\d{4})\)",
+    )
 
     # Only customer_name + report_date are TRULY required — without them we
     # can't build the filename or header. Risk profile / CKA fields are
@@ -153,6 +160,7 @@ def _parse_customer_level(page1_text: str) -> dict:
         customer_name=customer_name,
         report_date=report_date,
         risk_profile=(risk_profile or "").strip(),
+        risk_profile_expiry=risk_profile_expiry or "",
         cka_status=cka_status or "",
         cka_expiry=cka_expiry or "",
     )
@@ -206,6 +214,14 @@ def _parse_policy_block(
         r"Total Dividends Reinvested[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})",
         r"SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n\s*Total Dividends Reinvested",
     ])
+    total_dividends_paid_out = _grab_money_first(text, [
+        r"Total Dividends Paid Out\*?[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})",
+        r"SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n\s*Total Dividends Paid Out",
+    ])
+    total_partial_withdrawal = _grab_money_first(text, [
+        r"Total Partial Withdrawal\*?[ \t]+SGD[ \t]+(-?[\d,]+\.\d{2})",
+        r"SGD[ \t]+(-?[\d,]+\.\d{2})\s*\n\s*Total Partial Withdrawal",
+    ])
 
     total_pnl_pct = float(_grab_first(text, [
         r"Total P&L \(%\)[ \t]+(-?[\d.]+)",
@@ -247,7 +263,10 @@ def _parse_policy_block(
         annualised_pnl_pct=annualised_pnl_pct,
         total_rider_premiums=total_rider_premiums,
         total_dividends_reinvested=total_dividends_reinvested,
+        total_dividends_paid_out=total_dividends_paid_out,
+        total_partial_withdrawal=total_partial_withdrawal,
         risk_profile=customer["risk_profile"],
+        risk_profile_expiry=customer["risk_profile_expiry"],
         cka_status=customer["cka_status"],
         cka_expiry=customer["cka_expiry"],
         holdings=holdings,
@@ -273,7 +292,7 @@ def parse_pdf_single(pdf_path: str) -> RawReport:
 
 # ---------- Holdings parsing -------------------------------------------------
 
-_TICKER_RE = re.compile(r"\(([A-Z]{3,5})\)\s*$")
+_TICKER_RE = re.compile(r"\(([A-Z][A-Z0-9]*(?:\s+[A-Z][A-Z0-9]*)*)\)\s*$")
 _NUMERIC_RE = re.compile(r"-?[\d,]+\.\d+(?:\s*\d+)?")
 _FIELD_LABELS = {
     "fund_value": ("fund value",),
@@ -309,7 +328,7 @@ def _holdings_from_table(table: list[list[Optional[str]]]) -> list[Holding]:
 
         joined = " ".join(c for c in cells if c).replace("\n", " ").strip()
         m = _TICKER_RE.search(joined)
-        if m and not _looks_like_data_row(cells):
+        if m and not _looks_like_data_row(cells) and not _is_table_header_like(joined):
             ticker = m.group(1)
             full_name = joined[: m.start()].strip().rstrip("(").strip()
             pending_header = (full_name, ticker)
@@ -342,6 +361,14 @@ def _looks_like_data_row(cells: list[str]) -> bool:
     """A data row contains at least three numeric-looking cells."""
     numeric = sum(1 for c in cells if _NUMERIC_RE.fullmatch(c.replace("\n", " ").strip()))
     return numeric >= 3
+
+
+def _is_table_header_like(text: str) -> bool:
+    return bool(re.search(
+        r"Fund Holdings|Asset Class|Sub-?Asset|Fund Value|NAV|Units|Total P&L|Paid Out|Reinvested",
+        text,
+        re.IGNORECASE,
+    ))
 
 
 def _build_holding(

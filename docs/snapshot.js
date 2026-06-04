@@ -135,7 +135,6 @@ function metricCards(d) {
   const badge = d.adjustmentsActive
     ? ` <span style="background: #fff5e0; color: #8c6312; font-size: 9px; padding: 1px 5px; border-radius: 999px; margin-left: 4px; font-weight: 500;">ADJUSTED</span>`
     : '';
-
   return `
   <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 1.25rem;">
     ${card('Net gain', signedMoney(d.totalPnlDollar), `from S$${fmt0(d.policyInvestmentCost)} invested`, badge, d.totalPnlDollar < 0)}
@@ -319,6 +318,19 @@ function investmentJourney(d) {
   const frequencyDisclaimerRow = (isInvestReadyIII && d.premiumFrequencyAmbiguous && d.totalBonusPrincipal > 0)
     ? `<div style="color: #aaa; font-style: italic; font-size: 10px; margin-top: 2px; line-height: 1.4;">Pay frequency is at an anniversary mark — monthly vs annual is indistinguishable. Bonus assumes ANNUAL; subtract 5% if monthly-pay.</div>`
     : '';
+  const premiumLabel = d.isSinglePremium ? 'Single premium' : 'Annual premium';
+  const premiumProgress = d.isSinglePremium
+    ? `
+    <div style="margin-top: 14px; padding-top: 10px; border-top: 0.5px solid rgba(0,0,0,0.08); display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 10.5px; color: #888780;">
+      <span style="white-space: nowrap;">Single premium</span>
+      <span style="white-space: nowrap; color: #5f5e5a;">Paid at inception</span>
+    </div>`
+    : `
+    <div style="margin-top: 14px; padding-top: 10px; border-top: 0.5px solid rgba(0,0,0,0.08); display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 10.5px; color: #888780;">
+      <span style="white-space: nowrap;">Premium term · Flexi ${d.flexiTerm}</span>
+      <span style="display: flex; align-items: center; gap: 3px;">${dots}</span>
+      <span style="white-space: nowrap;">${d.premiumsPaidCount} of ${d.flexiTerm} paid · <span style="color: #5f5e5a;">${d.premiumsRemaining} years remaining</span></span>
+    </div>`;
 
   return `
   <div style="background: #ffffff; border: 0.5px solid rgba(0,0,0,0.08); border-radius: 12px; padding: 16px; margin-bottom: 1.25rem;">
@@ -328,7 +340,7 @@ function investmentJourney(d) {
         <p style="font-size: 18px; font-weight: 500; margin: 2px 0 0 0;">S$${fmt2(d.policyInvestmentCost)}</p>
         <p style="font-size: 11px; color: #888780; margin: 4px 0 0 0;">Inception · ${esc(d.inceptionDatePretty)}</p>
         <div style="margin-top: 10px; padding-top: 10px; border-top: 0.5px solid rgba(0,0,0,0.08); font-size: 11px; line-height: 1.7;">
-          <div style="color: #888780;">Annual premium: <span style="color: #1a1a1a; font-weight: 500;">S$${fmt2(d.annualPremium)}</span></div>
+          <div style="color: #888780;">${premiumLabel}: <span style="color: #1a1a1a; font-weight: 500;">S$${fmt2(d.annualPremium)}</span></div>
           ${riderRow}
           ${firstYearBonusRow}
           ${frequencyDisclaimerRow}
@@ -358,11 +370,7 @@ function investmentJourney(d) {
         : `<span><span style="display: inline-block; width: 8px; height: 8px; background: #1D9E75; border-radius: 2px; margin-right: 4px; vertical-align: middle;"></span>Gains (${fmtPct1(d.gainsPct)}%)</span>`
       }
     </div>
-    <div style="margin-top: 14px; padding-top: 10px; border-top: 0.5px solid rgba(0,0,0,0.08); display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 10.5px; color: #888780;">
-      <span style="white-space: nowrap;">Premium term · Flexi ${d.flexiTerm}</span>
-      <span style="display: flex; align-items: center; gap: 3px;">${dots}</span>
-      <span style="white-space: nowrap;">${d.premiumsPaidCount} of ${d.flexiTerm} paid · <span style="color: #5f5e5a;">${d.premiumsRemaining} years remaining</span></span>
-    </div>
+    ${premiumProgress}
   </div>`;
 }
 
@@ -408,7 +416,7 @@ function holdingsTable(d) {
           <span style="flex: 1; min-width: 0; word-break: break-word; overflow-wrap: anywhere;">${esc(h.displayName)}</span>
         </div>
       </td>
-      <td style="padding: 10px 6px; color: #5f5e5a;">${esc(h.assetClassLabel)}</td>
+      <td style="padding: 10px 6px; color: #5f5e5a;">${esc(h.subAssetClassLabel)}</td>
       <td style="padding: 10px 6px; text-align: right;">${fmt2(h.fundValue)}</td>
       <td style="padding: 10px 6px; text-align: right; color: ${cellColor(h.pnlDollar)}; font-weight: 500;">${signMoney(h.pnlDollar)}</td>
       <td style="padding: 10px 6px; text-align: right; color: ${cellColor(h.pnlPct)}; font-weight: 500;">${signPct(h.pnlPct)}</td>
@@ -422,7 +430,7 @@ function holdingsTable(d) {
       <thead>
         <tr style="border-bottom: 0.5px solid rgba(0,0,0,0.18);">
           <th style="text-align: left; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 44%;">Fund</th>
-          <th style="text-align: left; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 16%;">Asset class</th>
+          <th style="text-align: left; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 16%;">Sub-asset</th>
           <th style="text-align: right; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 16%;">Value (SGD)</th>
           <th style="text-align: right; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 12%;">P&amp;L ($)</th>
           <th style="text-align: right; padding: 8px 6px; font-weight: 500; color: #5f5e5a; width: 12%;">P&amp;L (%)</th>
@@ -511,12 +519,20 @@ function advisorProfileLine(d) {
 // "Risk profile:  · CKA:  (expiry )".
 function footerMetaLine(d) {
   const parts = [];
-  if (d.riskProfile) parts.push(`Risk profile: ${esc(d.riskProfile)}`);
+  if (d.riskProfile) {
+    parts.push(d.riskProfileExpiryPretty
+      ? `Risk profile: ${esc(d.riskProfile)} (${expiryPhrase(d.riskProfileExpiryPretty, d.riskProfileExpired)})`
+      : `Risk profile: ${esc(d.riskProfile)}`);
+  }
   if (d.ckaStatus) {
     parts.push(d.ckaExpiryPretty
-      ? `CKA: ${esc(d.ckaStatus)} (expiry ${esc(d.ckaExpiryPretty)})`
+      ? `CKA: ${esc(d.ckaStatus)} (${expiryPhrase(d.ckaExpiryPretty, d.ckaExpired)})`
       : `CKA: ${esc(d.ckaStatus)}`);
   }
   parts.push('Past performance is not indicative of future performance.');
   return parts.join(' · ');
+}
+
+function expiryPhrase(prettyDate, expired) {
+  return expired ? `expired ${esc(prettyDate)}` : `expiry ${esc(prettyDate)}`;
 }

@@ -5,7 +5,7 @@ import { lookupBonusRates } from './bonus.js';
 
 const COLORS = ['#0F6E56', '#185FA5', '#D85A30', '#534AB7', '#BA7517', '#0C447C', '#993556'];
 
-const ASSET_CLASS_LABELS = {
+const SUB_ASSET_CLASS_LABELS = {
   'Global Equity': 'Global equity',
   'Asia Equity': 'Asia equity',
   'US Equity': 'US equity',
@@ -34,24 +34,27 @@ const ASSET_CLASS_LABELS = {
  * to the cost basis (treating bonuses as if they were premiums paid).
  */
 export function derive(raw, options = {}) {
-  const flexiTerm = intFrom(raw.policyName, /Flexi\s+(\d+)/) ?? 10;
-  const policyTermYears = intFrom(raw.policyName, /(\d+)\s+Years?\s+Flexi/) ?? flexiTerm;
+  const isSinglePremium = isSinglePremiumPolicy(raw.policyName);
+  const flexiTerm = isSinglePremium ? 0 : (intFrom(raw.policyName, /Flexi\s+(\d+)/) ?? 10);
+  const policyTermYears = isSinglePremium ? null : (intFrom(raw.policyName, /(\d+)\s+Years?\s+Flexi/) ?? flexiTerm);
 
   const issueDate = parseDmy(raw.policyIssueDate);
   const reportDate = parseFlexibleDate(raw.reportDate);
 
   const monthsInvested = monthsBetween(issueDate, reportDate);
-  const premiumsPaidCount = countAnniversariesPaid(issueDate, reportDate);
-  const inferred = inferAnnualPremium(
-    raw.policyInvestmentCost,
-    issueDate,
-    reportDate,
-    premiumsPaidCount,
-  );
+  const premiumsPaidCount = isSinglePremium ? 1 : countAnniversariesPaid(issueDate, reportDate);
+  const inferred = isSinglePremium
+    ? { annualPremium: raw.policyInvestmentCost, frequency: 'single', ambiguous: false }
+    : inferAnnualPremium(
+        raw.policyInvestmentCost,
+        issueDate,
+        reportDate,
+        premiumsPaidCount,
+      );
   const annualPremium = inferred.annualPremium;
-  const premiumFrequency = inferred.frequency;             // 'monthly' | 'annual'
+  const premiumFrequency = inferred.frequency;             // 'single' | 'monthly' | 'annual'
   const premiumFrequencyAmbiguous = inferred.ambiguous;     // true at 12/24/36-mo boundaries
-  const premiumsRemaining = Math.max(0, flexiTerm - premiumsPaidCount);
+  const premiumsRemaining = isSinglePremium ? 0 : Math.max(0, flexiTerm - premiumsPaidCount);
 
   // Auto-detect bonus rates from the product/variation; allow caller overrides.
   // For unrecognised products (e.g. Manulink Investor (II) - SRS) we treat the
@@ -195,6 +198,11 @@ export function derive(raw, options = {}) {
     ckaStatus: raw.ckaStatus,
     ckaExpiry: raw.ckaExpiry,
     ckaExpiryPretty: prettyDate(raw.ckaExpiry),
+    ckaExpired: isExpiredDmy(raw.ckaExpiry, reportDate),
+    riskProfileExpiry: raw.riskProfileExpiry || '',
+    riskProfileExpiryPretty: prettyDate(raw.riskProfileExpiry),
+    riskProfileExpired: isExpiredDmy(raw.riskProfileExpiry, reportDate),
+    isSinglePremium,
     flexiTerm,
     policyTermYears,
     monthsInvested,
@@ -363,7 +371,7 @@ function enrichHoldings(holdings, accountValue) {
     allocationPct: accountValue ? (h.fundValue / accountValue) * 100 : 0,
     color: COLORS[i % COLORS.length],
     displayName: shortenFundName(h.fundFullName),
-    assetClassLabel: ASSET_CLASS_LABELS[h.subAssetClass] ?? h.subAssetClass,
+    subAssetClassLabel: SUB_ASSET_CLASS_LABELS[h.subAssetClass] ?? h.subAssetClass,
   }));
 }
 
@@ -432,6 +440,20 @@ function titleCaseName(name) {
 
 function prettifyPolicyName(name) {
   return (name || '').replace(/\(III\)\s+/, '(III) — ');
+}
+
+function isSinglePremiumPolicy(policyName) {
+  return /Manulink\s+Investor\s*\(II\)\s*-\s*SRS/i.test(policyName || '');
+}
+
+function isExpiredDmy(s, reportDate) {
+  if (!s) return false;
+  try {
+    const expiry = parseDmy(s);
+    return expiry < reportDate;
+  } catch {
+    return false;
+  }
 }
 
 function round1(n) { return Math.round(n * 10) / 10; }

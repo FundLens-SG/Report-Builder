@@ -95,6 +95,9 @@ function parseCustomerLevel(page1Text) {
   const ckaExpiry = grabFirst(page1Text, [
     /Customer Knowledge Assessment[\s\S]*?\(Expiry date:\s+(\d{2}\/\d{2}\/\d{4})\)/,
   ]);
+  const riskProfileExpiry = grabFirst(page1Text, [
+    /Risk Profile Questionnaire[\s\S]*?\(Expiry date:\s+(\d{2}\/\d{2}\/\d{4})\)/,
+  ]);
 
   // Only customerName + reportDate are TRULY required — without them we
   // can't build the filename or header. Everything else (riskProfile, CKA
@@ -111,6 +114,7 @@ function parseCustomerLevel(page1Text) {
     customerName,
     reportDate,
     riskProfile: riskProfile ? riskProfile.trim() : '',
+    riskProfileExpiry: riskProfileExpiry || '',
     ckaStatus: ckaStatus || '',
     ckaExpiry: ckaExpiry || '',
   };
@@ -266,7 +270,7 @@ function estimateWidth(str, h) {
 
 // ---------- Holdings parsing --------------------------------------------------
 
-const TICKER_RE = /\(([A-Z]{3,5})\)\s*$/;
+const TICKER_RE = /\(([A-Z][A-Z0-9]*(?:\s+[A-Z][A-Z0-9]*)*)\)\s*$/;
 // Numeric cells can be negative (e.g. "-170.11" P&L) and may include trailing
 // digits that pdfplumber/PDF.js wrap onto the next line ("3,326.3300\n0").
 const NUMERIC_RE = /^-?[\d,]+\.\d+(?:\s*\d+)?$/;
@@ -379,7 +383,7 @@ function extractHoldingsFromRows(rows, subAssetX) {
     const hasNumeric = row.some(c => NUMERIC_RE.test(c.text));
 
     const m = TICKER_RE.exec(flat);
-    if (m && !hasNumeric) {
+    if (m && !hasNumeric && !isTableHeaderLike(flat)) {
       pendingHeader = {
         ticker: m[1],
         fullName: flat.slice(0, m.index).replace(/\s*\(?\s*$/, '').trim(),
@@ -406,6 +410,10 @@ function extractHoldingsFromRows(rows, subAssetX) {
     }
   }
   return out;
+}
+
+function isTableHeaderLike(text) {
+  return /Fund Holdings|Asset Class|Sub-?Asset|Fund Value|NAV|Units|Total P&L|Paid Out|Reinvested/i.test(text);
 }
 
 function buildHoldingFromRow(header, row, wrapTexts, subAssetX) {

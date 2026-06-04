@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 
 TEMPLATE_DIR = Path(__file__).parent
@@ -42,7 +43,7 @@ def render_to_png(data: dict[str, Any], output_path: Path, scale: float = 2.0) -
     html = render_html(data)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = _launch_chromium(p)
         context = browser.new_context(
             viewport={"width": 720, "height": 1200},
             device_scale_factor=scale,
@@ -59,3 +60,29 @@ def render_to_png(data: dict[str, Any], output_path: Path, scale: float = 2.0) -
         element = page.locator(".report")
         element.screenshot(path=str(output_path), omit_background=False)
         browser.close()
+
+
+def _launch_chromium(playwright):
+    try:
+        return playwright.chromium.launch()
+    except PlaywrightError as exc:
+        msg = str(exc)
+        if "Executable doesn't exist" not in msg and "playwright install" not in msg:
+            raise
+
+        for candidate in _browser_candidates():
+            if candidate.exists():
+                return playwright.chromium.launch(executable_path=str(candidate))
+        raise
+
+
+def _browser_candidates() -> list[Path]:
+    env_path = os.environ.get("REPORT_BUILDER_BROWSER")
+    candidates = [
+        Path(env_path) if env_path else None,
+        Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+        Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+        Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+    ]
+    return [p for p in candidates if p is not None]
